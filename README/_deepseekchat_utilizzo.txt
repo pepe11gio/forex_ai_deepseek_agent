@@ -1,0 +1,40 @@
+# Inizializza chatbot
+chatbot = DeepSeekChat(api_key="la_tua_api_key")
+
+# Chat semplice
+response = chatbot.chat("Spiegami questa predizione del modello")
+
+# Analisi performance modello
+analysis = chatbot.analyze_model_performance(
+    performance_metrics=model_metrics,
+    feature_importance=feature_importance_df
+)
+
+# Generazione report
+report = chatbot.generate_trading_report(
+    model_info=model_info,
+    recent_predictions=recent_predictions,
+    market_conditions=market_data
+)
+
+# Salva conversazione
+chatbot.save_conversation("trading_analysis.json")
+
+_______________________________________________________________
+
+integrazione con sistema di training
+
+def get_ai_insights(predictor, recent_data, api_key):
+    """Ottiene insights AI sul sistema di trading."""
+    chatbot = create_trading_chatbot(api_key)
+    
+    # Predizione corrente
+    current_pred = predictor.predict_single(recent_data, return_confidence=True)
+    
+    # Spiegazione AI
+    explanation = chatbot.explain_prediction(
+        prediction_result=current_pred,
+        market_context={"volatility": calculate_volatility(recent_data)}
+    )
+    
+    return explanation

@@ -1,0 +1,17 @@
+{
+  "data": {
+    "sequence_length": 20,
+    "test_size": 0.2,
+    "target_column": "price"
+  },
+  "model": {
+    "type": "bidirectional",
+    "epochs": 150,
+    "batch_size": 64
+  },
+  "paths": {
+    "data_dir": "./financial_data",
+    "models_dir": "./trained_models",
+    "analysis_dir": "./reports"
+  }
+}

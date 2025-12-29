@@ -1,0 +1,14 @@
+# Inizializza trainer
+trainer = LSTMTradingModel(model_type='bidirectional', model_name='my_trading_model')
+
+# Costruisci modello
+trainer.build_model(input_shape=(10, 5), output_units=1)
+
+# Addestra
+results = trainer.train(X_train, y_train, X_val, y_val, epochs=100)
+
+# Predici
+predictions = trainer.predict(X_new, inverse_transform=True, scaler=data_scaler)
+
+# Salva
+trainer.save_model()

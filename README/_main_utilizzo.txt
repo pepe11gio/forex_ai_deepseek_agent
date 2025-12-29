@@ -1,0 +1,34 @@
+integrazione completa
+
+# Esempio utilizzo programmatico
+orchestrator = TradingAIOrchestrator(config_file="config.json")
+
+# Pipeline completo
+result = orchestrator.run_full_pipeline(data_file="trading_data.csv")
+
+# Oppure passo-passo
+orchestrator.load_data("trading_data.csv")
+orchestrator.train_model(model_type="bidirectional")
+orchestrator.setup_predictor()
+prediction = orchestrator.predict()
+ai_analysis = orchestrator.chat_about_prediction()
+
+_______________________________________________________________
+
+da riga di comando
+
+# Pipeline completo
+python main.py --mode full --data trading_data.csv
+
+# Solo addestramento
+python main.py --mode train --data-dir ./data --model-type bidirectional
+
+# Solo predizione
+python main.py --mode predict --input-data latest_data.csv
+
+# Chat interattiva
+python main.py --mode chat --api-key YOUR_DEEPSEEK_API_KEY
+
+# Modalità interattiva completa
+python main.py --mode interactive
+

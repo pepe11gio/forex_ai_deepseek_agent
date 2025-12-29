@@ -1,0 +1,22 @@
+# Inizializza predictor
+predictor = TradingPredictor(
+    model_path='models/trading_model.h5',
+    scaler_path='models/trading_model_scaler.pkl',
+    feature_names=['price', 'rsi', 'macd', 'volume']
+)
+
+# Predizione singola
+result = predictor.predict_single(
+    latest_data,  # Ultimi N tick
+    return_confidence=True
+)
+
+print(f"Predizione: {result['prediction']}")
+print(f"Segnale: {result['trading_signal']}")
+print(f"Confidence: {result['confidence_interval']}")
+
+# Predizioni future
+future_predictions = predictor.predict_sequence(
+    historical_data,
+    future_steps=5
+)
