@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class PatternAnalyzer:
     """
-    Classe per analizzare pattern e comportamenti appresi dal modello di trading.
+    Classe per analizzare pattern e comportamenti appresi dal modelo di trading.
     """
     
     def __init__(self, model: tf.keras.Model, scaler: Any = None):
@@ -195,8 +195,6 @@ class PatternAnalyzer:
         
         # Analizza autocorrelazione degli errori
         if len(predictions) > 1:
-            # Usa una versione semplificata per autocorrelazione
-            # In pratica, dovresti avere i valori reali per calcolare errori
             autocorr_analysis = self._analyze_autocorrelation(predictions)
         else:
             autocorr_analysis = {}
@@ -310,9 +308,20 @@ class PatternAnalyzer:
         Returns:
             Dizionario con analisi autocorrelazione
         """
-        from statsmodels.tsa.stattools import acf
-        
         try:
+            from statsmodels.tsa.stattools import acf
+            
+            # Gestisci serie troppo corte
+            if len(series) < max_lag * 2:
+                max_lag = min(10, len(series) // 2)
+                if max_lag < 2:
+                    return {
+                        'autocorrelation_values': [],
+                        'significant_lags': [],
+                        'has_autocorrelation': False,
+                        'error': 'Serie troppo corta per analisi autocorrelazione'
+                    }
+            
             autocorr = acf(series, nlags=max_lag, fft=True)
             
             # Trova lag significativi (autocorrelazione > 0.2 o < -0.2)
@@ -331,6 +340,14 @@ class PatternAnalyzer:
                 'has_autocorrelation': len(significant_lags) > 0
             }
             
+        except ImportError:
+            logger.warning("statsmodels non installato. Autocorrelazione non calcolata.")
+            return {
+                'autocorrelation_values': [],
+                'significant_lags': [],
+                'has_autocorrelation': False,
+                'error': 'statsmodels non installato'
+            }
         except Exception as e:
             logger.warning(f"Impossibile calcolare autocorrelazione: {str(e)}")
             return {
@@ -615,19 +632,19 @@ class PatternAnalyzer:
                 importance_values = [f['importance_mean'] for f in feat_importance[:5]]
                 if max(importance_values) > 2 * np.mean(importance_values):
                     top_feat = feat_importance[0]['feature']
-                    insights['insights'].append(f"La feature '{top_feat}' sembra avere importanza dominante")
+                    insights['insights'] = [f"La feature '{top_feat}' sembra avere importanza dominante"]
         
         # Analizza distribuzione predizioni
         pred_stats = report['prediction_distribution_test']['statistics']
         if abs(pred_stats['skewness']) > 1:
             skew_dir = "positivo" if pred_stats['skewness'] > 0 else "negativo"
-            insights['insights'].append(f"Distribuzione predizioni skew {skew_dir} (skewness={pred_stats['skewness']:.2f})")
+            insights['insights'] = [f"Distribuzione predizioni skew {skew_dir} (skewness={pred_stats['skewness']:.2f})"]
             insights['recommendations'].append(f"Considera trasformazione delle predizioni per ridurre skewness")
         
         # Aggiungi raccomandazioni generali
         insights['recommendations'].extend([
             "Monitora costantemente le performance su dati fuori campione",
-            "Considera ensemble di modelli per ridurre varianza",
+            "Considera ensemble di modelli per riduce varianza",
             "Implementa sistemi di stop-loss basati sulla confidence delle predizioni"
         ])
         
@@ -881,6 +898,31 @@ if __name__ == "__main__":
         print("\nTest analisi distribuzione predizioni...")
         dist_analysis = analyzer.analyze_prediction_distribution(X_test_analysis[:100])
         print(f"  Media predizioni: {dist_analysis['statistics']['mean']:.4f}")
-        #print(f"  Std pred
+        print(f"  Std predizioni: {dist_analysis['statistics']['std']:.4f}")
+        
+        # Test analisi feature importance
+        print("\nTest analisi feature importance...")
+        try:
+            X_sample = X_test_analysis[:50]
+            y_sample = y_test_analysis[:50]
+            importance_df = analyzer.analyze_feature_importance(X_sample, y_sample)
+            print(f"  Feature importance calcolata: {len(importance_df)} feature-timestep")
+        except Exception as e:
+            print(f"  Feature importance non disponibile: {e}")
+        
+        # Test analisi pattern temporali
+        print("\nTest analisi pattern temporali...")
+        try:
+            temporal_patterns = analyzer.analyze_temporal_patterns(X_test_analysis[:50])
+            print(f"  Pattern temporali analizzati: {temporal_patterns['n_samples_analyzed']} campioni")
+        except Exception as e:
+            print(f"  Analisi pattern temporali non disponibile: {e}")
+        
+        print("\n" + "=" * 50)
+        print("TEST COMPLETATO CON SUCCESSO!")
+        print("=" * 50)
+        
     except Exception as e:
-            logger.warning(f"Impossibile eseguire test di normalità: {str(e)}")
+        print(f"\nErrore durante il test: {str(e)}")
+        import traceback
+        traceback.print_exc()

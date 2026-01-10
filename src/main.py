@@ -32,6 +32,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+try:
+    from config import PATHS, create_directories
+    # Crea directory all'avvio
+    create_directories()
+except ImportError:
+    # Fallback se config.py non esiste
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(current_dir) == 'src':
+        PROJECT_ROOT = os.path.dirname(current_dir)
+    else:
+        PROJECT_ROOT = current_dir
+    
+    PATHS = {
+        'models': os.path.join(PROJECT_ROOT, 'models'),
+        'data': os.path.join(PROJECT_ROOT, 'data'),
+        'analysis': os.path.join(PROJECT_ROOT, 'analysis'),
+        'logs': os.path.join(PROJECT_ROOT, 'logs'),
+    }
+    
+    # Crea directory
+    for dir_path in PATHS.values():
+        os.makedirs(dir_path, exist_ok=True)
 
 class TradingAIOrchestrator:
     """
@@ -797,6 +820,7 @@ class TradingAIOrchestrator:
         print("  /help     - Mostra comandi disponibili")
         print("  /status   - Mostra stato sistema")
         print("  /predict  - Effettua predizione")
+        print("  /analyze  - Analizza ultima predizione con AI")
         print("  /report   - Genera report")
         print("  /clear    - Pulisce conversazione")
         print("  /exit     - Esci")
@@ -985,9 +1009,7 @@ class TradingAIOrchestrator:
     def run_full_pipeline(self, data_file: str = None):
         """
         Esegue il pipeline completo del sistema.
-        
-        Args:
-            data_file: Percorso file dati (opzionale)
+        CORREZIONE: Ordine corretto delle operazioni
         """
         logger.info("=" * 60)
         logger.info("AVVIO PIPELINE COMPLETO SISTEMA TRADING AI")
@@ -1009,42 +1031,57 @@ class TradingAIOrchestrator:
                 logger.error("Pipeline interrotto: errore nell'addestramento")
                 return
             
-            logger.info(f"*********************** analyze_model")
-            # 4. Analizza modello
-            analysis_result = self.analyze_model()
-            if not analysis_result["success"]:
-                logger.warning("Analisi modello non riuscita, continuo...")
-            
-            logger.info(f"*********************** setup_predictor")
-            # 5. Configura predictor
+            # 4. Configura predictor PRIMA dell'analisi
+            logger.info("Configurazione predictor...")
             predictor_result = self.setup_predictor()
             if not predictor_result["success"]:
                 logger.error("Pipeline interrotto: errore nella configurazione predictor")
                 return
             
+            # 5. Analizza modello (OPZIONALE - può fallire senza bloccare)
+            logger.info("Analisi modello...")
+            try:
+                analysis_result = self.analyze_model()
+                if not analysis_result["success"]:
+                    logger.warning("Analisi modello non riuscita, continuo...")
+            except Exception as e:
+                logger.warning(f"Analisi modello fallita: {e}")
+            
             # 6. Configura chatbot
+            logger.info("Configurazione chatbot...")
             chatbot_result = self.setup_chatbot()
             if not chatbot_result["success"]:
                 logger.warning("Chatbot non configurato correttamente, continuo...")
             
             # 7. Effettua predizione di test
-            prediction_result = self.predict()
-            if not prediction_result["success"]:
-                logger.warning("Predizione test non riuscita")
-            else:
-                logger.info(f"Predizione test: {prediction_result['prediction']['prediction']:.4f}")
+            logger.info("Predizione di test...")
+            if self.system_state["predictor_ready"]:
+                try:
+                    prediction_result = self.predict()
+                    if not prediction_result["success"]:
+                        logger.warning("Predizione test non riuscita")
+                    else:
+                        logger.info(f"Predizione test: {prediction_result['prediction']['prediction']:.4f}")
+                except Exception as e:
+                    logger.warning(f"Errore nella predizione: {e}")
             
-            # 8. Analizza con AI
+            # 8. Analizza con AI (se chatbot pronto)
             if self.system_state["chatbot_ready"]:
-                ai_result = self.chat_about_prediction()
-                if ai_result["success"]:
-                    logger.info("Analisi AI completata")
+                try:
+                    ai_result = self.chat_about_prediction()
+                    if ai_result["success"]:
+                        logger.info("Analisi AI completata")
+                except Exception as e:
+                    logger.warning(f"Analisi AI fallita: {e}")
             
-            # 9. Genera report
+            # 9. Genera report (se chatbot pronto)
             if self.system_state["chatbot_ready"]:
-                report_result = self.generate_trading_report()
-                if report_result["success"]:
-                    logger.info(f"Report generato: {report_result['report_file']}")
+                try:
+                    report_result = self.generate_trading_report()
+                    if report_result["success"]:
+                        logger.info(f"Report generato: {report_result['report_file']}")
+                except Exception as e:
+                    logger.warning(f"Generazione report fallita: {e}")
             
             # Aggiorna stato finale
             self.system_state["initialized"] = True
@@ -1065,6 +1102,8 @@ class TradingAIOrchestrator:
             
         except Exception as e:
             logger.error(f"Errore nel pipeline completo: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "success": False,
                 "error": str(e),

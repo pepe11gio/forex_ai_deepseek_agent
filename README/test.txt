@@ -1,0 +1,355 @@
+MANUALE COMANDI - TRADING AI SYSTEM
+1. SETUP INIZIALE E VERIFICA AMBIENTE
+bash
+
+# Verifica e configura l'ambiente
+python src/run_corrected.py
+
+# Installa dipendenze
+pip install -r requirements.txt
+
+# Verifica struttura directory
+python src/config.py
+
+2. MODALITÀ INTERATTIVA COMPLETA (Raccomandata per iniziare)
+bash
+
+python src/run_corrected.py --mode interactive
+
+# O direttamente dal main
+python src/main.py --mode interactive
+
+3. MODALITÀ SPECIFICHE DA RIGA DI COMANDO
+Pipeline completo automatico (dati → training → analisi → predizione)
+bash
+
+python src/main.py --mode full --data data/sample_trading_data.csv
+
+# Con parametri personalizzati
+python src/main.py --mode full --data data/eurusd.csv --model-type bidirectional --epochs 50 --batch-size 64
+
+Solo addestramento modello
+bash
+
+python src/main.py --mode train --data-dir data --model-type stacked --epochs 100 --batch-size 32
+
+# Specifica file dati preciso
+python src/main.py --mode train --data data/eurusd_1min.csv --epochs 150
+
+Solo predizioni (con modello esistente)
+bash
+
+python src/main.py --mode predict --data-dir data
+
+# Con dati specifici per predizione
+python src/main.py --mode predict --input-data data/latest_tick.csv
+
+Solo analisi modello
+bash
+
+python src/main.py --mode analyze --data-dir data
+
+Solo chat con AI
+bash
+
+# Con API key (se configurata)
+python src/main.py --mode chat --api-key "tuo-api-key-qui"
+
+# In modalità simulazione (senza API key)
+python src/main.py --mode chat
+
+4. COMANDI AVANZATI E OPZIONI
+Training con configurazione completa
+bash
+
+python src/main.py --mode train \
+  --data data/forex_data.csv \
+  --model-type bidirectional \
+  --epochs 200 \
+  --batch-size 128 \
+  --config custom_config.json
+
+Predizione batch su multiple file
+bash
+
+# Predice su tutti i file CSV nella directory (Linux/Mac)
+for file in data/*.csv; do
+  python src/main.py --mode predict --input-data "$file"
+done
+
+# Windows (PowerShell)
+Get-ChildItem data/*.csv | ForEach-Object {
+  python src/main.py --mode predict --input-data $_.FullName
+}
+
+Genera report AI con dati recenti
+bash
+
+python src/main.py --mode chat --generate-report
+
+Test rapido del sistema
+bash
+
+python src/run_corrected.py --mode test
+
+5. COMANDI PER GESTIONE MODELLI
+Lista modelli disponibili
+bash
+
+# Linux/Mac
+ls -la models/*.h5
+
+# Windows
+dir models\*.h5
+
+Ripara modelli problematici
+bash
+
+python src/model_fixer.py
+
+Carica modello specifico
+bash
+
+python src/main.py --mode predict --model-type existing --model-name trading_model_20251229_120000
+
+6. COMANDI PER DATI
+Crea dati di esempio
+bash
+
+python -c "
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+dates = [datetime.now() - timedelta(minutes=i) for i in range(1000)]
+prices = 100 + np.random.randn(1000).cumsum() * 0.5
+
+df = pd.DataFrame({
+    'timestamp': dates,
+    'price': prices,
+    'volume': np.random.randint(1000, 10000, 1000)
+})
+df.to_csv('data/my_data.csv', index=False)
+print(f'Dati creati: data/my_data.csv ({len(df)} righe)')
+"
+
+Verifica dati caricati
+bash
+
+python -c "
+import pandas as pd
+df = pd.read_csv('data/sample_trading_data.csv')
+print(f'Righe: {len(df)}')
+print(f'Colonne: {list(df.columns)}')
+print(f'Periodo: {df.timestamp.min()} a {df.timestamp.max()}')
+"
+
+7. COMANDI PER MONITORAGGIO E DEBUG
+Visualizza log del sistema
+bash
+
+# Linux/Mac
+tail -f logs/trading_system_*.log
+
+# Windows
+type logs\trading_system_*.log | more
+
+Visualizza report di analisi
+bash
+
+python -c "
+import glob, json, os
+reports = glob.glob('analysis/*/model_analysis_report_*.json')
+if reports:
+    latest = max(reports, key=os.path.getctime)
+    with open(latest) as f:
+        data = json.load(f)
+    print(f'Report: {os.path.basename(latest)}')
+    print(f'R2 Score: {data[\"performance_metrics\"][\"test\"][\"r2\"]:.4f}')
+else:
+    print('Nessun report trovato')
+"
+
+Test singoli moduli
+bash
+
+# Test data_loader
+python -c "from data_loader import FinancialDataLoader; print('✅ data_loader OK')"
+
+# Test model_trainer
+python -c "from model_trainer import LSTMTradingModel; print('✅ model_trainer OK')"
+
+# Test predictor
+python -c "from predictor import TradingPredictor; print('✅ predictor OK')"
+
+8. SCRIPT BATCH PER AUTOMAZIONE
+Windows - run_trading.bat:
+batch
+
+@echo off
+echo ========================================
+echo   SISTEMA TRADING AI - AVVIO AUTOMATICO
+echo ========================================
+echo.
+
+REM Imposta variabile ambiente per DeepSeek API
+set DEEPSEEK_API_KEY=la_tua_api_key_qui
+
+REM Avvia in modalità interattiva
+python src\run_corrected.py
+
+pause
+
+Linux/Mac - daily_training.sh:
+bash
+
+#!/bin/bash
+echo "🧠 Daily Training - $(date)"
+echo "=============================="
+
+python src/main.py --mode train \
+  --data data/latest_data.csv \
+  --model-type bidirectional \
+  --epochs 50
+
+python src/main.py --mode analyze
+python src/main.py --mode predict
+python src/main.py --mode chat --generate-report
+
+echo "✅ Training giornaliero completato!"
+
+9. COMANDI DOCKER (se configurato)
+bash
+
+# Build immagine
+docker build -t trading-ai .
+
+# Esegui container
+docker run -v $(pwd)/data:/app/data -v $(pwd)/models:/app/models trading-ai
+
+# Esegui con API key
+docker run -e DEEPSEEK_API_KEY="tua-chiave" -v $(pwd)/data:/app/data trading-ai --mode full
+
+10. COMANDI DI UTILITÀ RAPIDA
+Avvio veloce
+bash
+
+# Crea dati di esempio e avvia
+python src/run_corrected.py
+
+Reset ambiente
+bash
+
+# Linux/Mac
+rm -rf models/* analysis/* logs/*
+
+# Windows (CMD)
+rmdir /S /Q models
+rmdir /S /Q analysis
+rmdir /S /Q logs
+mkdir models analysis logs
+
+11. ESEMPIO DI SESSIONE COMPLETA
+bash
+
+# 1. Setup iniziale
+python src/run_corrected.py
+
+# 2. Scegli "2. Pipeline completo automatico" dal menu
+
+# 3. Dopo training, usa predictor
+python src/main.py --mode predict
+
+# 4. Chatta con AI per analisi
+python src/main.py --mode chat
+
+# 5. Genera report finale
+python src/main.py --mode chat --generate-report
+
+12. VARIABILI AMBIENTE
+bash
+
+# Linux/Mac
+export DEEPSEEK_API_KEY="tuo-api-key-qui"
+
+# Windows (Prompt dei comandi)
+set DEEPSEEK_API_KEY=tuo-api-key-qui
+
+# Windows (PowerShell)
+$env:DEEPSEEK_API_KEY="tuo-api-key-qui"
+
+13. MENU INTERATTIVO - OPZIONI DISPONIBILI
+
+Quando esegui python src/run_corrected.py, hai queste opzioni:
+
+    Chat interattiva completa - Chat con AI + predizioni + analisi
+
+    Pipeline completo automatico - Dati → Training → Analisi → Predizione
+
+    Solo addestramento modello - Training senza analisi
+
+    Solo predizioni - Usa modello esistente per predire
+
+    Solo analisi modello - Analizza modello esistente
+
+    Test rapido - Test di tutti i componenti
+
+14. FLAGS DISPONIBILI NELLA CLI
+text
+
+--mode          Modalità: full, train, predict, analyze, chat, interactive
+--data          Percorso file dati CSV specifico
+--data-dir      Directory dati (default: "data")
+--model-type    Tipo modello: standard, stacked, bidirectional
+--epochs        Numero epoche training
+--batch-size    Dimensione batch
+--api-key       API key DeepSeek
+--config        File configurazione JSON
+--input-data    File dati per predizione specifica
+--generate-report Genera report AI automaticamente
+
+15. TROUBLESHOOTING RAPIDO
+Problema: Modello non si carica
+bash
+
+python src/model_fixer.py
+python src/main.py --mode predict --model-type existing
+
+Problema: Dati non trovati
+bash
+
+python src/run_corrected.py  # Crea dati di esempio automaticamente
+
+Problema: Dipendenze mancanti
+bash
+
+pip install --upgrade -r requirements.txt
+
+Problema: Errori TensorFlow
+bash
+
+# Prova con TensorFlow CPU
+pip uninstall tensorflow -y
+pip install tensorflow-cpu
+
+# O aggiorna tutto
+pip install --upgrade tensorflow pandas numpy scikit-learn
+
+16. PERFORMANCE E MONITORING
+bash
+
+# Training con monitor risorse
+python src/main.py --mode train --epochs 10 --batch-size 16  # Test rapido
+
+# Training esteso
+python src/main.py --mode train --epochs 500 --batch-size 256  # High performance
+
+# Usa checkpoint esistenti
+python src/main.py --mode train --data data/large_dataset.csv --epochs 1000
+
+NOTA: Per la maggior parte degli utenti, il comando migliore per iniziare è:
+bash
+
+python src/run_corrected.py
+
+Questo avvia il menu interattivo che guida attraverso tutte le funzionalità.
