@@ -5,7 +5,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PATHS = {
-    "root": BASE_DIR,
+    "root": r"C:/Users/Giovanni/Documents/Python/forex_ai_deepseek_agent",
     "src": os.path.join(BASE_DIR, "src"),
     "models": os.path.join(BASE_DIR, "models"),
     "data": os.path.join(BASE_DIR, "data"),

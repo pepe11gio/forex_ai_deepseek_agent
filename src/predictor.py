@@ -443,97 +443,104 @@ class TradingPredictor:
             }
     
     def generate_trading_signal(self, prediction: float, 
-                               input_data: np.ndarray = None) -> Dict[str, Any]:
+                           input_data: np.ndarray = None) -> Dict[str, Any]:
         """
-        Genera segnale di trading basato sulla predizione.
+        Genera segnale di trading completo con TP/SL.
         
         Args:
             prediction: Valore predetto
             input_data: Dati di input (opzionale, per contesto)
             
         Returns:
-            Dizionario con segnale di trading
+            Dizionario con segnale di trading completo
         """
-        # Soglie di default (possono essere personalizzate)
-        BUY_THRESHOLD = 0.02    # 2% sopra
-        SELL_THRESHOLD = -0.02  # 2% sotto
-        STRONG_BUY = 0.05       # 5% sopra
-        STRONG_SELL = -0.05     # 5% sotto
+        # Calcola TP/SL
+        tp_sl_result = self.calculate_tp_sl(prediction, None, input_data)
         
-        # Se abbiamo input_data, calcoliamo riferimento dal prezzo attuale
-        reference_price = None
-        if input_data is not None and self.scaler is not None:
-            try:
-                # Estrai ultimo prezzo dalla sequenza
-                last_price_normalized = input_data[0, -1, 0]  # Assume price è prima feature
-                
-                # De-normalizza
-                dummy_array = np.zeros((1, self.n_features))
-                dummy_array[0, 0] = last_price_normalized
-                denorm_array = self.scaler.inverse_transform(dummy_array)
-                reference_price = float(denorm_array[0, 0])
-            except:
-                pass
+        # Determina forza del segnale
+        percent_change = tp_sl_result['predicted_move_pct']
         
-        # Se non abbiamo reference_price, usiamo una logica semplificata
-        if reference_price is None:
-            # Logica basata su soglie assolute (semplificata)
-            if prediction > STRONG_BUY:
-                signal = 'STRONG_BUY'
-                strength = 1.0
-            elif prediction > BUY_THRESHOLD:
-                signal = 'BUY'
-                strength = 0.7
-            elif prediction < STRONG_SELL:
-                signal = 'STRONG_SELL'
-                strength = 1.0
-            elif prediction < SELL_THRESHOLD:
-                signal = 'SELL'
-                strength = 0.7
-            else:
-                signal = 'NEUTRAL'
-                strength = 0.0
-            
-            percent_change = prediction  # In questo caso, prediction è già il cambio %
-            
+        if percent_change > 5.0:
+            signal = 'STRONG_BUY' if percent_change > 0 else 'STRONG_SELL'
+            strength = 1.0
+        elif percent_change > 2.0:
+            signal = 'BUY' if percent_change > 0 else 'SELL'
+            strength = 0.7
+        elif abs(percent_change) > 0.5:
+            signal = 'WEAK_BUY' if percent_change > 0 else 'WEAK_SELL'
+            strength = 0.4
         else:
-            # Calcola cambio percentuale
-            percent_change = ((prediction - reference_price) / reference_price * 100 
-                            if reference_price != 0 else 0)
-            
-            # Genera segnale basato su percent_change
-            if percent_change > STRONG_BUY * 100:  # Converti in percentuale
-                signal = 'STRONG_BUY'
-                strength = min(1.0, percent_change / (STRONG_BUY * 100 * 2))
-            elif percent_change > BUY_THRESHOLD * 100:
-                signal = 'BUY'
-                strength = min(0.7, (percent_change - BUY_THRESHOLD * 100) / 
-                             ((STRONG_BUY - BUY_THRESHOLD) * 100))
-            elif percent_change < STRONG_SELL * 100:
-                signal = 'STRONG_SELL'
-                strength = min(1.0, abs(percent_change) / (abs(STRONG_SELL) * 100 * 2))
-            elif percent_change < SELL_THRESHOLD * 100:
-                signal = 'SELL'
-                strength = min(0.7, (abs(percent_change) - abs(SELL_THRESHOLD) * 100) / 
-                             ((abs(STRONG_SELL) - abs(SELL_THRESHOLD)) * 100))
-            else:
-                signal = 'NEUTRAL'
-                strength = 0.0
+            signal = 'NEUTRAL'
+            strength = 0.0
         
-        # Calcola confidence del segnale (semplificato)
-        signal_confidence = min(0.95, 0.5 + abs(percent_change) / 10)
+        # Aggiungi raccomandazioni specifiche
+        recommendations = self._generate_trading_recommendations_with_tpsl(
+            signal, strength, tp_sl_result
+        )
         
-        # Aggiungi raccomandazioni
-        recommendations = self._generate_trading_recommendations(signal, strength, percent_change)
-        
-        return {
+        # Combina risultati
+        result = {
             'trading_signal': signal,
             'signal_strength': float(strength),
-            'signal_confidence': float(signal_confidence),
+            'signal_confidence': tp_sl_result['confidence'],
             'predicted_change_percent': float(percent_change),
-            'reference_price': reference_price,
+            'operation_details': tp_sl_result,
             'recommendations': recommendations,
-            'signal_timestamp': datetime.now().isoformat()
+            'signal_timestamp': datetime.now().isoformat(),
+            'execution_summary': self._generate_execution_summary(tp_sl_result)
+        }
+        
+        return result
+
+    def _generate_trading_recommendations_with_tpsl(self, signal: str, strength: float,
+                                                    tp_sl_result: Dict) -> List[str]:
+        """Genera raccomandazioni specifiche con TP/SL."""
+        recommendations = []
+        
+        operation = tp_sl_result['operation']
+        tp = tp_sl_result['take_profit']
+        sl = tp_sl_result['stop_loss']
+        rr = tp_sl_result['risk_reward_ratio']
+        lots = tp_sl_result['position_size']['lots']
+        
+        # Raccomandazioni base
+        recommendations.append(f"{operation} a {tp_sl_result['entry_price']}")
+        recommendations.append(f"TP: {tp} ({tp_sl_result['tp_pips']} pips)")
+        recommendations.append(f"SL: {sl} ({tp_sl_result['sl_pips']} pips)")
+        recommendations.append(f"R/R Ratio: {rr}:1")
+        recommendations.append(f"Position size: {lots} lots")
+        
+        # Raccomandazioni condizionali
+        if rr < 1:
+            recommendations.append("⚠️ R/R basso: considera aspettare setup migliore")
+        elif rr > 2:
+            recommendations.append("✅ Ottimo R/R ratio")
+        
+        if strength > 0.8:
+            recommendations.append("🎯 Segnale forte - puoi usare size normale")
+        elif strength > 0.5:
+            recommendations.append("📊 Segnale moderato - considera size ridotta")
+        else:
+            recommendations.append("⚡ Segnale debole - usa size piccola o aspetta")
+        
+        # Gestione trade
+        recommendations.append("📌 Imposta TP e SL subito dopo l'ingresso")
+        recommendations.append("📊 Monitora: se il trade va a +10 pips, sposta SL a BE")
+        
+        return recommendations
+
+    def _generate_execution_summary(self, tp_sl_result: Dict) -> Dict[str, Any]:
+        """Genera summary per esecuzione rapida."""
+        return {
+            'action': tp_sl_result['operation'],
+            'entry': tp_sl_result['entry_price'],
+            'tp': tp_sl_result['take_profit'],
+            'sl': tp_sl_result['stop_loss'],
+            'risk_pips': tp_sl_result['sl_pips'],
+            'reward_pips': tp_sl_result['tp_pips'],
+            'rr_ratio': tp_sl_result['risk_reward_ratio'],
+            'position_size_lots': tp_sl_result['position_size']['lots'],
+            'confidence': tp_sl_result['confidence']
         }
     
     def _generate_trading_recommendations(self, signal: str, strength: float, 
@@ -728,6 +735,139 @@ class TradingPredictor:
             
         except Exception as e:
             logger.error(f"Errore nel salvataggio del log: {str(e)}")
+
+    def calculate_tp_sl(self, prediction: float, current_price: float = None, 
+                    input_data: np.ndarray = None) -> Dict[str, Any]:
+        """
+        Calcola Take Profit e Stop Loss basati sulla predizione.
+        MODIFICA: Usa valori più realistici per Forex
+        """
+        # Se non abbiamo il prezzo corrente, prova a estrarlo
+        if current_price is None and input_data is not None and self.scaler is not None:
+            try:
+                # Estrai ultimo prezzo dalla sequenza
+                last_price_normalized = input_data[0, -1, 0]  # Assume price è prima feature
+                dummy_array = np.zeros((1, self.n_features))
+                dummy_array[0, 0] = last_price_normalized
+                denorm_array = self.scaler.inverse_transform(dummy_array)
+                current_price = float(denorm_array[0, 0])
+            except:
+                current_price = 1.10000  # Default EUR/USD
+        
+        if current_price is None:
+            current_price = 1.10000  # Default EUR/USD
+        
+        # La predizione è già normalizzata, convertila in pips realistici
+        # Assumiamo che una predizione di 1.0 = 50 pips
+        predicted_pips = prediction * 50  # Scala la predizione a pips
+        
+        # Limita i pips a range realistico
+        predicted_pips = max(min(predicted_pips, 100), -100)
+        
+        # Determina operazione
+        if predicted_pips > 0:
+            operation = "BUY"
+            # Per Forex, TP/SL tipici sono 30-50 pips
+            tp_pips = 30  # TP fisso di 30 pips
+            sl_pips = 20  # SL fisso di 20 pips
+        else:
+            operation = "SELL"
+            tp_pips = 30
+            sl_pips = 20
+        
+        # Calcola prezzi TP/SL basati su pips
+        # Per la maggior parte delle coppie forex (non JPY)
+        pip_value = 0.0001
+        
+        if operation == "BUY":
+            tp_price = current_price + (tp_pips * pip_value)
+            sl_price = current_price - (sl_pips * pip_value)
+        else:  # SELL
+            tp_price = current_price - (tp_pips * pip_value)
+            sl_price = current_price + (sl_pips * pip_value)
+        
+        # Round per forex (5 decimali per maggiori coppie)
+        decimals = 5
+        tp_price = round(tp_price, decimals)
+        sl_price = round(sl_price, decimals)
+        current_price = round(current_price, decimals)
+        
+        # Calcola Risk/Reward Ratio
+        rr_ratio = tp_pips / sl_pips if sl_pips > 0 else 1.0
+        
+        # Raccogliamo anche altre info per posizione sizing
+        position_size = self._calculate_position_size(current_price, sl_pips, predicted_pips)
+        
+        return {
+            'operation': operation,
+            'entry_price': current_price,
+            'take_profit': tp_price,
+            'stop_loss': sl_price,
+            'tp_pips': tp_pips,
+            'sl_pips': sl_pips,
+            'risk_reward_ratio': round(rr_ratio, 2),
+            'predicted_move_pct': round(predicted_pips * pip_value / current_price * 100, 4),
+            'position_size': position_size,
+            'confidence': min(0.95, 0.5 + abs(prediction) / 2)
+        }
+
+    def _calculate_position_size(self, entry_price: float, sl_pips: int, 
+                                predicted_change: float) -> Dict[str, Any]:
+        """
+        Calcola dimensionamento della posizione basato su rischio.
+        
+        Args:
+            entry_price: Prezzo di entrata
+            sl_pips: Stop loss in pips
+            predicted_change: Variazione % predetta
+            
+        Returns:
+            Dizionario con info position sizing
+        """
+        # Parametri di rischio (personalizzabili)
+        RISK_PER_TRADE = 0.02  # 2% del capitale per trade
+        ACCOUNT_BALANCE = 10000.0  # Saldo account di esempio
+        LOT_SIZE = 100000  # Dimensione lotto standard
+        
+        # Calcola rischio in valuta
+        risk_amount = ACCOUNT_BALANCE * RISK_PER_TRADE
+        
+        # Calcola valore per pip
+        if entry_price < 10:  # JPY
+            pip_value = 0.01
+        else:
+            pip_value = 0.0001
+        
+        # Calcola size della posizione
+        if sl_pips > 0:
+            risk_per_pip = risk_amount / sl_pips
+            
+            # Per forex, il valore per pip per lotto standard è ~$10 per EUR/USD
+            # Adattiamo in base al prezzo
+            if entry_price < 1.5:
+                pip_per_lot = 10.0
+            else:
+                pip_per_lot = 10.0 * (entry_price / 1.1)
+            
+            lots = risk_per_pip / pip_per_lot
+            position_value = lots * LOT_SIZE * entry_price
+        else:
+            lots = 0.01  # Mini lot
+            position_value = lots * LOT_SIZE * entry_price
+        
+        # Rounding
+        if lots < 0.01:
+            lots = 0.01  # Minimum lot
+        elif lots > 10:
+            lots = 10.0  # Maximum lot
+        
+        return {
+            'lots': round(lots, 2),
+            'position_value_usd': round(position_value, 2),
+            'risk_amount_usd': round(risk_amount, 2),
+            'risk_percent': RISK_PER_TRADE * 100,
+            'account_balance': ACCOUNT_BALANCE
+        }
 
 
 # Funzioni di utilità

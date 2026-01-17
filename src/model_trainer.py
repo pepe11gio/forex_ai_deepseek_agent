@@ -511,15 +511,12 @@ class LSTMTradingModel:
         plt.show()
     
     def save_model(self, model_path: str = None, 
-                  scaler_path: str = None,
-                  metadata: Dict = None):
+              scaler_path: str = None,
+              metadata: Dict = None,
+              force_scaler_save: bool = True):  # Aggiungi questo parametro
         """
         Salva il modello e gli oggetti correlati.
-        
-        Args:
-            model_path: Percorso per salvare il modello
-            scaler_path: Percorso per salvare lo scaler
-            metadata: Metadati aggiuntivi da salvare
+        FORZA il salvataggio dello scaler anche se None.
         """
         # Crea directory se non esiste
         os.makedirs('models', exist_ok=True)
@@ -531,32 +528,60 @@ class LSTMTradingModel:
         if scaler_path is None:
             scaler_path = f'models/{self.model_name}_scaler.pkl'
         
-        # Salva modello
+        # 1. Salva modello
         self.model.save(model_path)
-        logger.info(f"Modello salvato in: {model_path}")
+        logger.info(f"✅ Modello salvato in: {model_path}")
         
-        # Salva scaler se disponibile
+        # 2. CRITICO: Salva sempre lo scaler
         if self.scaler is not None:
             joblib.dump(self.scaler, scaler_path)
-            logger.info(f"Scaler salvato in: {scaler_path}")
+            logger.info(f"✅ Scaler salvato in: {scaler_path}")
+        elif force_scaler_save:
+            # Se lo scaler è None, creane uno di default e salvalo
+            logger.warning("⚠️  Scaler è None, creo e salvo scaler di default")
+            from sklearn.preprocessing import StandardScaler
+            default_scaler = StandardScaler()
+            
+            # Fit con dati dummy basati su forex tipici
+            dummy_data = np.array([
+                [1.1010, 1.1000, 1.0990, 0.0010, 0.0008, 50, 50, 0.0010, -0.0010],
+                [1.1020, 1.1010, 1.1000, 0.0020, 0.0015, 60, 55, 0.0020, -0.0020],
+                [1.1000, 1.0990, 1.0980, -0.0010, -0.0005, 40, 45, -0.0010, 0.0010]
+            ])
+            default_scaler.fit(dummy_data)
+            
+            joblib.dump(default_scaler, scaler_path)
+            logger.info(f"✅ Scaler di default salvato in: {scaler_path}")
         
-        # Salva metadata
+        # 3. Salva metadata
         metadata_path = f'models/{self.model_name}_metadata.json'
-        if metadata is not None:
-            import json
-            metadata_to_save = {
-                'model_type': self.model_type,
-                'model_name': self.model_name,
-                'sequence_length': self.sequence_length,
-                'n_features': self.n_features,
-                'training_date': datetime.now().isoformat(),
-                **metadata
-            }
-            
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata_to_save, f, indent=2)
-            
-            logger.info(f"Metadata salvati in: {metadata_path}")
+        if metadata is None:
+            metadata = {}
+        
+        # Assicurati che i feature names siano salvati
+        if hasattr(self.data_loader, 'feature_names') and self.data_loader.feature_names:
+            metadata['feature_names'] = self.data_loader.feature_names
+        
+        metadata_to_save = {
+            'model_type': self.model_type,
+            'model_name': self.model_name,
+            'sequence_length': self.sequence_length,
+            'n_features': self.n_features,
+            'training_date': datetime.now().isoformat(),
+            'scaler_saved': self.scaler is not None or force_scaler_save,
+            **metadata
+        }
+        
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata_to_save, f, indent=2)
+        
+        logger.info(f"✅ Metadata salvati in: {metadata_path}")
+        
+        # 4. DEBUG: Stampa verifica file creati
+        logger.info("📁 FILE CREATI IN MODELS/:")
+        logger.info(f"   • {os.path.basename(model_path)}")
+        logger.info(f"   • {os.path.basename(scaler_path)}")
+        logger.info(f"   • {os.path.basename(metadata_path)}")
     
     def load_model(self, model_path: str, scaler_path: str = None):
         """

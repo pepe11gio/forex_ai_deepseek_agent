@@ -197,53 +197,103 @@ def setup_environment():
         return None
 
 def update_system_config(paths):
-    def update_system_config(paths):
-        """Aggiorna la configurazione del sistema per usare i percorsi corretti."""
-        # Crea un file di configurazione temporaneo
-        config_content = '''# Configurazione percorsi sistema
-    import os
+    """Aggiorna la configurazione del sistema per usare i percorsi corretti."""
+    # Crea un file di configurazione temporaneo
+    config_content = '''# Configurazione percorsi sistema
+import os
 
-    # Ottieni la directory radice del progetto
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ottieni la directory radice del progetto
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    PATHS = {
-        "root": r"''' + paths['root'].replace('\\', '/') + '''",
-        "src": os.path.join(BASE_DIR, "src"),
-        "models": os.path.join(BASE_DIR, "models"),
-        "data": os.path.join(BASE_DIR, "data"),
-        "analysis": os.path.join(BASE_DIR, "analysis"),
-        "logs": os.path.join(BASE_DIR, "logs")
-    }
+PATHS = {
+    "root": r"''' + paths['root'].replace('\\', '/') + '''",
+    "src": os.path.join(BASE_DIR, "src"),
+    "models": os.path.join(BASE_DIR, "models"),
+    "data": os.path.join(BASE_DIR, "data"),
+    "analysis": os.path.join(BASE_DIR, "analysis"),
+    "logs": os.path.join(BASE_DIR, "logs")
+}
 
-    # Configurazione data loader
-    DATA_CONFIG = {
-        "sequence_length": 20,
-        "test_size": 0.2,
-        "target_column": "price",
-        "exclude_columns": ["timestamp"]
-    }
+# Configurazione data loader
+DATA_CONFIG = {
+    "sequence_length": 20,
+    "test_size": 0.2,
+    "target_column": "price",
+    "exclude_columns": ["timestamp"]
+}
 
-    # Funzione per creare directory
-    def create_directories():
-        """Crea tutte le directory necessarie se non esistono."""
-        for dir_path in PATHS.values():
-            os.makedirs(dir_path, exist_ok=True)
-            print(f"Directory verificata: {dir_path}")
+# Funzione per creare directory
+def create_directories():
+    """Crea tutte le directory necessarie se non esistono."""
+    for dir_path in PATHS.values():
+        os.makedirs(dir_path, exist_ok=True)
+        print(f"Directory verificata: {dir_path}")
+    
+    # Directory extra
+    checkpoints_dir = os.path.join(PATHS["models"], "checkpoints")
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    print(f"Directory verificata: {checkpoints_dir}")
+    
+    return PATHS
+'''
+    
+    config_file = os.path.join(paths['src'], 'config.py')
+    with open(config_file, 'w', encoding='utf-8') as f:
+        f.write(config_content)
+    
+    logger.info(f"Configurazione salvata in: {config_file}")
+    return config_file
+
+def run_quick_test(paths):
+    """Esegue un test rapido del sistema."""
+    try:
+        print("\n🧪 Test 1/4: Import moduli...")
+        sys.path.insert(0, paths['src'])
+        from data_loader import FinancialDataLoader
+        from model_trainer import LSTMTradingModel
+        from predictor import TradingPredictor
+        print("✅ Import moduli OK")
         
-        # Directory extra
-        checkpoints_dir = os.path.join(PATHS["models"], "checkpoints")
-        os.makedirs(checkpoints_dir, exist_ok=True)
-        print(f"Directory verificata: {checkpoints_dir}")
+        print("\n🧪 Test 2/4: Verifica directory...")
+        for dir_name, dir_path in [
+            ("models", paths['models']),
+            ("data", paths['data']),
+            ("analysis", paths['analysis']),
+            ("logs", paths['logs'])
+        ]:
+            if os.path.exists(dir_path):
+                print(f"  ✅ {dir_name}: {dir_path}")
+            else:
+                print(f"  ❌ {dir_name}: NON ESISTE")
+                return False
         
-        return PATHS
-    '''
+        print("\n🧪 Test 3/4: Test dati di esempio...")
+        data_file = os.path.join(paths['data'], 'sample_trading_data.csv')
+        if os.path.exists(data_file):
+            import pandas as pd
+            df = pd.read_csv(data_file, nrows=5)
+            print(f"  ✅ Dati caricati: {len(df)} righe, {len(df.columns)} colonne")
+        else:
+            print(f"  ❌ File dati non trovato: {data_file}")
         
-        config_file = os.path.join(paths['src'], 'config.py')
-        with open(config_file, 'w', encoding='utf-8') as f:
-            f.write(config_content)
+        print("\n🧪 Test 4/4: Test creazione modello...")
+        import tensorflow as tf
+        import numpy as np
         
-        logger.info(f"Configurazione salvata in: {config_file}")
-        return config_file
+        # Crea modello semplice
+        model = tf.keras.Sequential([
+            tf.keras.layers.LSTM(16, input_shape=(20, 5)),
+            tf.keras.layers.Dense(1)
+        ])
+        
+        model.compile(optimizer='adam', loss='mse')
+        print("✅ Modello compilato correttamente")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Test fallito: {str(e)}")
+        return False
 
 def main():
     """Avvia il sistema corretto."""
@@ -297,6 +347,9 @@ def main():
         print("4. Solo predizioni")
         print("5. Solo analisi")
         print("6. Test rapido")
+        print("7. Predizione con ordine TP/SL")
+        print("8. Predizione su file specifico")
+        print("9. Predizione su file specifico con ordine TP/SL")
         print("0. Esci")
         
         while True:
@@ -420,7 +473,7 @@ def main():
                     # Carica dati per predizione
                     data_result = orchestrator.load_data()
                     if data_result["success"]:
-                        prediction = orchestrator.predict()
+                        prediction = orchestrator.predict(generate_order=False)
                         
                         if prediction["success"]:
                             pred = prediction["prediction"]
@@ -505,6 +558,195 @@ def main():
                     
                     break
                 
+                elif choice == "7":
+                    # Predizione con ordine TP/SL
+                    print("\n" + "=" * 60)
+                    print("🎯 PREDIZIONE CON ORDINE TP/SL")
+                    print("=" * 60)
+                    
+                    # Configura predictor se non pronto
+                    if not orchestrator.system_state["predictor_ready"]:
+                        print("Predictor non configurato. Configuro...")
+                        orchestrator.setup_predictor()
+                    
+                    # Carica dati
+                    data_result = orchestrator.load_data()
+                    if not data_result["success"]:
+                        print(f"❌ Errore nel caricamento dati: {data_result.get('error')}")
+                        continue
+                    
+                    print("Effettuo predizione e genero ordine con TP/SL...")
+                    
+                    try:
+                        # Usa il metodo predict con generate_order=True
+                        prediction_result = orchestrator.predict(generate_order=True)
+                        
+                        if prediction_result["success"]:
+                            pred = prediction_result["prediction"]
+                            
+                            if "order" in pred:
+                                order_result = pred["order"]
+                                
+                                if order_result.get("success", False):
+                                    print("\n" + "=" * 60)
+                                    print("✅ ORDINE CREATO CON SUCCESSO!")
+                                    print("=" * 60)
+                                    
+                                    # Stampa summary
+                                    if "execution_summary" in order_result:
+                                        exec_summary = order_result["execution_summary"]
+                                        print(f"\n📋 EXECUTION SUMMARY:")
+                                        print(f"  Operazione: {exec_summary.get('action', 'N/A')}")
+                                        print(f"  Entry Price: {exec_summary.get('entry', 'N/A')}")
+                                        print(f"  Take Profit: {exec_summary.get('tp', 'N/A')}")
+                                        print(f"  Stop Loss: {exec_summary.get('sl', 'N/A')}")
+                                        print(f"  R/R Ratio: {exec_summary.get('rr_ratio', 'N/A')}:1")
+                                        print(f"  Position Size: {exec_summary.get('position_size_lots', 'N/A')} lots")
+                                    
+                                    # Stampa display completo se disponibile
+                                    if "display_text" in order_result:
+                                        print("\n📊 ORDINE COMPLETO:")
+                                        print(order_result["display_text"])
+                                    
+                                    # Chiedi se salvare
+                                    save = input("\nSalvare ordine su file? (s/n): ").lower()
+                                    if save == 's':
+                                        import json
+                                        from datetime import datetime
+                                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                        filename = f"order_{timestamp}.json"
+                                        
+                                        with open(filename, 'w') as f:
+                                            json.dump(order_result, f, indent=2)
+                                        
+                                        print(f"✅ Ordine salvato in: {filename}")
+                                else:
+                                    print(f"❌ Errore nella creazione ordine: {order_result.get('error', 'Errore sconosciuto')}")
+                                    if 'warnings' in order_result:
+                                        print(f"Warnings: {order_result['warnings']}")
+                            else:
+                                print("❌ Ordine non generato nel risultato")
+                                
+                                # Mostra comunque la predizione base
+                                print(f"\n📊 PREDIZIONE BASE:")
+                                print(f"  Valore: {pred['prediction']:.4f}")
+                                print(f"  Segnale: {pred['trading_signal']}")
+                                print(f"  Confidenza: {pred['signal_confidence']:.2f}")
+                        else:
+                            print(f"❌ Errore nella predizione: {prediction_result.get('error', 'Errore sconosciuto')}")
+                            
+                    except Exception as e:
+                        print(f"\n❌ Errore nell'esecuzione: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                    break
+                
+                elif choice == "8" or choice == "9":
+                    # Predizione su file specifico
+                    print("\n" + "=" * 60)
+                    print("🎯 PREDIZIONE SU FILE SPECIFICO")
+                    print("=" * 60)
+                    
+                    # Configura predictor se non pronto
+                    if not orchestrator.system_state["predictor_ready"]:
+                        print("Predictor non configurato. Configuro...")
+                        orchestrator.setup_predictor()
+                    
+                    # Chiedi il file
+                    test_file = input("\nPercorso del file CSV di test (premi Invio per usare test.csv): ").strip()
+                    if not test_file:
+                        test_file = "test.csv"
+                    
+                    # Verifica che il file esista
+                    if not os.path.exists(test_file):
+                        print(f"❌ File non trovato: {test_file}")
+                        print("   Il file deve essere nella directory corrente o specificare il percorso completo.")
+                        continue
+                    
+                    print(f"File selezionato: {test_file}")
+                    
+                    # Determina se generare ordine
+                    generate_order = (choice == "9")
+                    
+                    if generate_order:
+                        print("\nEffettuo predizione e genero ordine con TP/SL...")
+                    else:
+                        print("\nEffettuo predizione...")
+                    
+                    try:
+                        # Importa il metodo predict_from_file
+                        from main import TradingAIOrchestrator as TAI
+                        
+                        # Usa reflection per chiamare il metodo
+                        result = orchestrator.predict_from_file(test_file, generate_order=generate_order)
+                        
+                        if result["success"]:
+                            pred = result["prediction"]
+                            
+                            print("\n" + "=" * 60)
+                            print("✅ PREDIZIONE RIUSCITA!")
+                            print("=" * 60)
+                            print(f"File: {os.path.basename(result['test_file'])}")
+                            print(f"Valore predetto: {pred['prediction']:.4f}")
+                            print(f"Segnale: {pred['trading_signal']}")
+                            print(f"Confidenza: {pred['signal_confidence']:.2f}")
+                            
+                            if 'confidence_interval' in pred:
+                                ci = pred['confidence_interval']
+                                print(f"Intervallo confidenza: [{ci['lower']:.4f}, {ci['upper']:.4f}]")
+                            
+                            if generate_order and "order" in pred:
+                                order_result = pred["order"]
+                                
+                                if order_result.get("success"):
+                                    print("\n" + "=" * 60)
+                                    print("✅ ORDINE GENERATO!")
+                                    print("=" * 60)
+                                    
+                                    # Stampa summary
+                                    if "execution_summary" in order_result:
+                                        es = order_result["execution_summary"]
+                                        print(f"\n📋 EXECUTION SUMMARY:")
+                                        print(f"  Operazione: {es.get('action', 'N/A')}")
+                                        print(f"  Entry Price: {es.get('entry', 'N/A')}")
+                                        print(f"  Take Profit: {es.get('tp', 'N/A')}")
+                                        print(f"  Stop Loss: {es.get('sl', 'N/A')}")
+                                        print(f"  R/R Ratio: {es.get('rr_ratio', 'N/A')}:1")
+                                        print(f"  Position Size: {es.get('position_size_lots', 'N/A')} lots")
+                                    
+                                    # Stampa display completo se disponibile
+                                    if "display_text" in order_result:
+                                        print("\n📊 ORDINE COMPLETO:")
+                                        print(order_result["display_text"])
+                                    
+                                    # Chiedi se salvare
+                                    save = input("\nSalvare ordine su file? (s/n): ").lower()
+                                    if save == 's':
+                                        import json
+                                        from datetime import datetime
+                                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                        filename = f"order_{timestamp}.json"
+                                        
+                                        with open(filename, 'w') as f:
+                                            json.dump(order_result, f, indent=2)
+                                        
+                                        print(f"✅ Ordine salvato in: {filename}")
+                                else:
+                                    print(f"\n⚠️  Ordine non generato: {order_result.get('error', 'Errore sconosciuto')}")
+                        else:
+                            print(f"\n❌ Errore: {result.get('error', 'Errore sconosciuto')}")
+                        
+                    except AttributeError:
+                        print("\n⚠️  La funzionalità di predizione su file specifico non è disponibile.")
+                        print("   Aggiorna il file main.py con il metodo predict_from_file().")
+                    except Exception as e:
+                        print(f"\n❌ Errore: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                    break
+                
                 else:
                     print("Scelta non valida. Riprova.")
             
@@ -531,57 +773,6 @@ def main():
         logger.error(f"Errore nell'avvio del sistema: {str(e)}")
         import traceback
         traceback.print_exc()
-
-def run_quick_test(paths):
-    """Esegue un test rapido del sistema."""
-    try:
-        print("\n🧪 Test 1/4: Import moduli...")
-        sys.path.insert(0, paths['src'])
-        from data_loader import FinancialDataLoader
-        from model_trainer import LSTMTradingModel
-        from predictor import TradingPredictor
-        print("✅ Import moduli OK")
-        
-        print("\n🧪 Test 2/4: Verifica directory...")
-        for dir_name, dir_path in [
-            ("models", paths['models']),
-            ("data", paths['data']),
-            ("analysis", paths['analysis']),
-            ("logs", paths['logs'])
-        ]:
-            if os.path.exists(dir_path):
-                print(f"  ✅ {dir_name}: {dir_path}")
-            else:
-                print(f"  ❌ {dir_name}: NON ESISTE")
-                return False
-        
-        print("\n🧪 Test 3/4: Test dati di esempio...")
-        data_file = os.path.join(paths['data'], 'sample_trading_data.csv')
-        if os.path.exists(data_file):
-            import pandas as pd
-            df = pd.read_csv(data_file, nrows=5)
-            print(f"  ✅ Dati caricati: {len(df)} righe, {len(df.columns)} colonne")
-        else:
-            print(f"  ❌ File dati non trovato: {data_file}")
-        
-        print("\n🧪 Test 4/4: Test creazione modello...")
-        import tensorflow as tf
-        import numpy as np
-        
-        # Crea modello semplice
-        model = tf.keras.Sequential([
-            tf.keras.layers.LSTM(16, input_shape=(20, 5)),
-            tf.keras.layers.Dense(1)
-        ])
-        
-        model.compile(optimizer='adam', loss='mse')
-        print("✅ Modello compilato correttamente")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Test fallito: {str(e)}")
-        return False
 
 if __name__ == "__main__":
     main()

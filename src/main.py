@@ -169,44 +169,56 @@ class TradingAIOrchestrator:
         
         logger.info("Directory inizializzate")
     
-    def load_data(self, data_file: str = None, data_dir: str = None) -> Dict[str, Any]:
+    def load_data(self, data_file: str = None, data_dir: str = None, 
+              test_mode: bool = False) -> Dict[str, Any]:
         """
-        Carica e prepara i dati finanziari.
-        
-        Args:
-            data_file: Percorso file CSV specifico
-            data_dir: Directory con file CSV (se data_file non specificato)
-            
-        Returns:
-            Dizionario con dati preparati e informazioni
+        Carica e prepara i dati finanziari da TUTTI i file CSV.
         """
         logger.info("=" * 60)
-        logger.info("FASE 1: CARICAMENTO DATI")
+        logger.info("FASE 1: CARICAMENTO DATI DA MULTIPLI FILE")
         logger.info("=" * 60)
         
         try:
-            # Determina file dati
-            if data_file and os.path.exists(data_file):
-                filepath = data_file
-            elif data_dir:
-                # Cerca file CSV nella directory
-                csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
-                if not csv_files:
-                    raise FileNotFoundError(f"Nessun file CSV trovato in {data_dir}")
-                
-                # Prendi il file più recente
-                csv_files.sort(key=lambda x: os.path.getmtime(os.path.join(data_dir, x)), reverse=True)
-                filepath = os.path.join(data_dir, csv_files[0])
-                logger.info(f"Usando file più recente: {csv_files[0]}")
-            else:
-                # Usa directory di default
-                default_dir = self.config["paths"]["data_dir"]
-                csv_files = [f for f in os.listdir(default_dir) if f.endswith('.csv')]
-                if not csv_files:
-                    raise FileNotFoundError(f"Nessun file CSV trovato in {default_dir}")
-                
-                filepath = os.path.join(default_dir, csv_files[0])
-                logger.info(f"Usando file: {csv_files[0]}")
+            # Determina directory dati
+            if data_dir is None:
+                data_dir = self.config["paths"]["data_dir"]
+            
+            # Trova TUTTI i file CSV
+            import glob
+            csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+            
+            if not csv_files:
+                raise FileNotFoundError(f"Nessun file CSV trovato in {data_dir}")
+            
+            logger.info(f"Trovati {len(csv_files)} file CSV:")
+            for i, csv_file in enumerate(csv_files, 1):
+                logger.info(f"  {i}. {os.path.basename(csv_file)}")
+            
+            # Legge e concatena TUTTI i file
+            all_dataframes = []
+            
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    logger.info(f"  ✓ {os.path.basename(csv_file)}: {len(df)} righe")
+                    all_dataframes.append(df)
+                except Exception as e:
+                    logger.error(f"  ✗ Errore caricamento {csv_file}: {e}")
+                    continue
+            
+            if not all_dataframes:
+                raise ValueError("Nessun file CSV caricato con successo")
+            
+            # Concatena tutti i DataFrame
+            combined_df = pd.concat(all_dataframes, ignore_index=True)
+            combined_df = combined_df.sort_values('timestamp')  # Ordina per tempo
+            
+            logger.info(f"✅ Dati combinati: {len(combined_df)} righe totali")
+            logger.info(f"   Periodo: da {combined_df['timestamp'].iloc[0]} a {combined_df['timestamp'].iloc[-1]}")
+            
+            # Usa un file temporaneo per il processing
+            temp_file = os.path.join(data_dir, "_combined_temp.csv")
+            combined_df.to_csv(temp_file, index=False)
             
             # Configura data loader
             data_config = self.config["data"]
@@ -216,14 +228,21 @@ class TradingAIOrchestrator:
                 random_state=42
             )
             
-            # Carica e prepara dati
-            logger.info(f"Caricamento dati da: {filepath}")
-            results = load_and_prepare_data(
-                filepath=filepath,
-                sequence_length=data_config["sequence_length"],
-                test_size=data_config["test_size"],
-                lookahead=10
-            )
+            # Processa dati combinati
+            if test_mode:
+                results = self._load_data_for_test(temp_file, data_config)
+            else:
+                results = load_and_prepare_data(
+                    filepath=temp_file,
+                    sequence_length=data_config["sequence_length"],
+                    test_size=data_config["test_size"],
+                    lookahead=10
+                )
+            
+            # Pulisci file temporaneo
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
             
             X_train, X_test, y_train, y_test, df_original, df_normalized, loader = results
             
@@ -232,35 +251,38 @@ class TradingAIOrchestrator:
             self.system_state["data_info"] = {
                 "file": filepath,
                 "original_samples": len(df_original),
-                "train_samples": len(X_train),
+                "train_samples": len(X_train) if not test_mode else 0,
                 "test_samples": len(X_test),
                 "sequence_length": data_config["sequence_length"],
-                "n_features": X_train.shape[2],
+                "n_features": X_train.shape[2] if not test_mode else X_test.shape[2],
                 "feature_names": loader.feature_names,
-                "loaded_at": datetime.now().isoformat()
+                "loaded_at": datetime.now().isoformat(),
+                "test_mode": test_mode
             }
             
             # Salva in cache
             self.results_cache["data"] = {
-                "X_train": X_train,
+                "X_train": X_train if not test_mode else None,
                 "X_test": X_test,
-                "y_train": y_train,
+                "y_train": y_train if not test_mode else None,
                 "y_test": y_test,
                 "df_original": df_original,
                 "df_normalized": df_normalized,
                 "loader": loader
             }
             
-            logger.info(f"Dati caricati: {len(X_train)} train, {len(X_test)} test sequenze")
+            if test_mode:
+                logger.info(f"Dati di test caricati: {len(X_test)} sequenze")
+            else:
+                logger.info(f"Dati caricati: {len(X_train)} train, {len(X_test)} test sequenze")
+            
             logger.info(f"Feature: {loader.feature_names}")
             
             return {
                 "success": True,
                 "data_info": self.system_state["data_info"],
                 "shapes": {
-                    "X_train": X_train.shape,
                     "X_test": X_test.shape,
-                    "y_train": y_train.shape,
                     "y_test": y_test.shape
                 }
             }
@@ -272,6 +294,51 @@ class TradingAIOrchestrator:
                 "success": False,
                 "error": str(e)
             }
+
+    def _load_data_for_test(self, filepath: str, data_config: Dict) -> Tuple:
+        """
+        Carica dati specifici per test/predizione.
+        """
+        # Carica il file
+        df = pd.read_csv(filepath)
+        
+        # Prepara features
+        df = self.data_loader.prepare_features(
+            df, 
+            target_column=data_config["target_column"],
+            exclude_columns=data_config["exclude_columns"]
+        )
+        
+        # Normalizza
+        df_normalized = self.data_loader.normalize_data(df, fit=False)
+        
+        # Prendi solo le ultime sequenze per predizione
+        sequence_length = data_config["sequence_length"]
+        n_samples = len(df)
+        
+        # Calcola quante sequenze complete possiamo creare
+        n_sequences = n_samples - sequence_length + 1
+        
+        if n_sequences <= 0:
+            raise ValueError(
+                f"Non abbastanza dati per predizione. "
+                f"Servono almeno {sequence_length} tick, ricevuti: {n_samples}"
+            )
+        
+        # Crea tutte le sequenze possibili
+        features_data = df_normalized[self.data_loader.feature_columns].values
+        
+        X_test = []
+        for i in range(n_sequences):
+            sequence = features_data[i:i + sequence_length]
+            X_test.append(sequence)
+        
+        X_test = np.array(X_test)
+        
+        # Per test, y_test sono valori dummy (non usati per predizione)
+        y_test = np.zeros(len(X_test))
+        
+        return X_test, X_test, y_test, y_test, df, df_normalized, self.data_loader
     
     def train_model(self, use_cached_data: bool = True, **kwargs) -> Dict[str, Any]:
         """
@@ -1136,7 +1203,212 @@ class TradingAIOrchestrator:
         except Exception as e:
             logger.error(f"Errore nel salvataggio stato sistema: {str(e)}")
 
+    def predict(self, input_data: Any = None, use_latest: bool = True,
+            generate_order: bool = False) -> Dict[str, Any]:
+        """
+        Effettua una predizione.
+        
+        Args:
+            input_data: Dati di input (se None, usa dati di test)
+            use_latest: Se True e input_data=None, usa ultimi dati test
+            generate_order: Se True, genera ordine completo con TP/SL
+            
+        Returns:
+            Dizionario con risultati predizione
+        """
+        logger.info("=" * 60)
+        logger.info("FASE 5: PREDIZIONE")
+        logger.info("=" * 60)
+        
+        try:
+            # Verifica predictor pronto
+            if not self.system_state["predictor_ready"]:
+                raise ValueError("Predictor non configurato. Esegui prima setup_predictor()")
+            
+            # Prepara dati input
+            if input_data is not None:
+                # Usa dati forniti
+                prediction_data = input_data
+                data_source = "user_provided"
+            elif use_latest and "data" in self.results_cache:
+                # Usa ultimi dati di test
+                test_data = self.results_cache["data"]["X_test"]
+                if len(test_data) > 0:
+                    # Prendi ultima sequenza
+                    last_sequence = test_data[-1:]
+                    
+                    # Converti in formato adatto (semplificato)
+                    # In pratica, dovresti avere i dati originali
+                    prediction_data = last_sequence
+                    data_source = "test_set"
+                else:
+                    raise ValueError("Nessun dato di test disponibile")
+            else:
+                raise ValueError("Nessun dato di input fornito")
+            
+            # Effettua predizione
+            logger.info("Effettuando predizione...")
+            prediction_result = self.predictor.predict_single(
+                prediction_data,
+                return_confidence=True,
+                use_cache=self.config["prediction"]["cache_predictions"]
+            )
+            
+            # Se richiesto, genera ordine con TP/SL
+            if generate_order:
+                try:
+                    # Importa trading_executor dinamicamente
+                    import sys
+                    import os
+                    
+                    # Assicurati che il modulo sia nel path
+                    src_dir = os.path.join(os.path.dirname(__file__))
+                    if src_dir not in sys.path:
+                        sys.path.insert(0, src_dir)
+                    
+                    from trading_executor import create_executor_from_prediction
+                    
+                    order_result = create_executor_from_prediction(prediction_result)
+                    prediction_result["order"] = order_result
+                    logger.info("Ordine TP/SL generato")
+                except ImportError as e:
+                    logger.warning(f"trading_executor non trovato: {e}, ordine non generato")
+                    # Crea una struttura di fallback
+                    prediction_result["order"] = {
+                        "success": False,
+                        "error": f"Modulo trading_executor non trovato: {str(e)}"
+                    }
+                except Exception as e:
+                    logger.error(f"Errore nella generazione ordine: {str(e)}")
+                    prediction_result["order"] = {
+                        "success": False,
+                        "error": str(e)
+                    }
+            
+            # Salva in cache
+            if "predictions" not in self.results_cache:
+                self.results_cache["predictions"] = []
+            
+            self.results_cache["predictions"].append({
+                "result": prediction_result,
+                "timestamp": datetime.now().isoformat(),
+                "data_source": data_source
+            })
+            
+            # Limita cache predizioni
+            max_predictions_cache = 100
+            if len(self.results_cache["predictions"]) > max_predictions_cache:
+                self.results_cache["predictions"] = self.results_cache["predictions"][-max_predictions_cache:]
+            
+            logger.info(f"Predizione completata: {prediction_result['prediction']:.4f}")
+            logger.info(f"Segnale: {prediction_result['trading_signal']}")
+            
+            return {
+                "success": True,
+                "prediction": prediction_result,
+                "data_source": data_source
+            }
+            
+        except Exception as e:
+            logger.error(f"Errore nella predizione: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
+    def predict_from_file(self, test_file: str, generate_order: bool = False) -> Dict[str, Any]:
+        """
+        Effettua una predizione su un file di test specifico.
+        
+        Args:
+            test_file: Percorso del file CSV di test
+            generate_order: Se True, genera ordine completo con TP/SL
+            
+        Returns:
+            Dizionario con risultati predizione
+        """
+        logger.info("=" * 60)
+        logger.info(f"PREDIZIONE SU FILE SPECIFICO: {os.path.basename(test_file)}")
+        logger.info("=" * 60)
+        
+        try:
+            # Verifica predictor pronto
+            if not self.system_state["predictor_ready"]:
+                logger.info("Predictor non configurato. Configuro...")
+                self.setup_predictor()
+            
+            # Carica dati di test specifici
+            logger.info(f"Caricamento file di test: {test_file}")
+            data_result = self.load_data(data_file=test_file, test_mode=True)
+            
+            if not data_result["success"]:
+                raise ValueError(f"Errore nel caricamento dati: {data_result.get('error')}")
+            
+            # Prepara l'ultima sequenza per predizione
+            test_data = self.results_cache["data"]["X_test"]
+            
+            if len(test_data) == 0:
+                raise ValueError("Nessun dato disponibile per la predizione")
+            
+            # Prendi l'ultima sequenza completa
+            last_sequence = test_data[-1:]
+            
+            logger.info(f"Effettuando predizione su {len(test_data)} sequenze...")
+            
+            # Effettua predizione
+            prediction_result = self.predictor.predict_single(
+                last_sequence,
+                return_confidence=True,
+                use_cache=False
+            )
+            
+            # Se richiesto, genera ordine
+            if generate_order:
+                try:
+                    from trading_executor import create_executor_from_prediction
+                    order_result = create_executor_from_prediction(prediction_result)
+                    prediction_result["order"] = order_result
+                    logger.info("Ordine TP/SL generato")
+                except Exception as e:
+                    logger.warning(f"Impossibile generare ordine: {str(e)}")
+                    # Usa versione semplice
+                    from predictor import create_simple_order
+                    order_result = create_simple_order(prediction_result)
+                    prediction_result["order"] = order_result
+            
+            # Salva in cache
+            if "predictions" not in self.results_cache:
+                self.results_cache["predictions"] = []
+            
+            self.results_cache["predictions"].append({
+                "result": prediction_result,
+                "timestamp": datetime.now().isoformat(),
+                "data_source": f"file:{os.path.basename(test_file)}",
+                "test_file": test_file
+            })
+            
+            logger.info(f"Predizione completata: {prediction_result['prediction']:.4f}")
+            logger.info(f"Segnale: {prediction_result['trading_signal']}")
+            
+            return {
+                "success": True,
+                "prediction": prediction_result,
+                "test_file": test_file,
+                "sequence_used": last_sequence.shape
+            }
+            
+        except Exception as e:
+            logger.error(f"Errore nella predizione da file: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": str(e),
+                "test_file": test_file
+            }
+    
 def main():
     """Funzione principale per esecuzione da riga di comando."""
     parser = argparse.ArgumentParser(description="Sistema di Trading AI con DeepSeek Integration")
