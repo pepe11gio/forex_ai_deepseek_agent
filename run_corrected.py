@@ -23,6 +23,56 @@ project_root = current_file_dir
 
 print(f"📁 Directory progetto: {project_root}")
 
+def check_dependencies():
+    """Verifica che tutte le dipendenze siano installate."""
+    import subprocess
+    import sys
+    
+    required_packages = [
+        'tensorflow>=2.13.0',
+        'pandas>=1.5.0',
+        'numpy>=1.23.0',
+        'scikit-learn>=1.2.0',
+        'joblib>=1.2.0'
+    ]
+    
+    print("🔍 Verifica dipendenze...")
+    
+    for package in required_packages:
+        try:
+            if '>=' in package:
+                pkg_name = package.split('>=')[0]
+            else:
+                pkg_name = package
+            
+            __import__(pkg_name)
+            print(f"  ✅ {package}")
+        except ImportError as e:
+            print(f"  ❌ {package} - MANCANTE!")
+            print(f"     Installa con: pip install {package}")
+            return False
+    
+    # Verifica versione TensorFlow specifica
+    try:
+        import tensorflow as tf
+        tf_version = tf.__version__
+        print(f"  ✅ TensorFlow versione: {tf_version}")
+        
+        # Verifica che sia Keras 2.x
+        import keras
+        if hasattr(keras, '__version__'):
+            keras_version = keras.__version__
+            print(f"  ✅ Keras versione: {keras_version}")
+            
+            if keras_version.startswith('3.'):
+                print("  ⚠️  ATTENZIONE: Keras 3.x rilevato")
+                print("     Il sistema è ottimizzato per Keras 2.x")
+                print("     Alcune funzionalità potrebbero non funzionare")
+    except Exception as e:
+        print(f"  ⚠️  Errore verifica TensorFlow: {e}")
+    
+    return True
+
 def setup_environment():
     """Configura le directory necessarie."""
     directories = {
@@ -58,6 +108,12 @@ def main():
     # Aggiungi src/ al path di Python
     src_dir = os.path.join(project_root, 'src')
     sys.path.insert(0, src_dir)
+
+    # 🔥 Verifica dipendenze
+    #if not check_dependencies():
+    #    print("\n❌ Dipendenze mancanti. Installa con:")
+    #    print("   pip install -r requirements.txt")
+    #    return
     
     try:
         from main import TradingAIOrchestrator
@@ -78,6 +134,7 @@ def main():
         print("5. Predizione su file specifico con TP/SL")
         print("6. Pipeline completo (training + predizione + analisi)")
         print("7. Training evoluto con self-learning") 
+        print("8. PIPELINE UNIFICATA (transfer learning)")
         print("0. Esci")
         print("=" * 40)
         
@@ -157,20 +214,81 @@ def main():
                     else:
                         print(f"❌ Errore: {result.get('error')}")
                 
-                elif choice == "3":
-                    # ANALISI MODELLO
+                elif choice == "3":  # Analisi modello
                     print("\n" + "=" * 60)
                     print("📊 ANALISI MODELLO")
                     print("=" * 60)
                     
-                    result = orchestrator.analyze_model()
+                    # Chiedi quale modello analizzare
+                    import glob
+                    models_dir = os.path.join(project_root, 'models')
+                    model_files = []
+                    model_files.extend(glob.glob(os.path.join(models_dir, "*.keras")))
+                    model_files.extend(glob.glob(os.path.join(models_dir, "*.h5")))
+                    
+                    if not model_files:
+                        print("❌ Nessun modello trovato in models/")
+                        continue
+                    
+                    # Mostra modelli disponibili
+                    print("\n📁 MODELLI DISPONIBILI:")
+                    for i, model_file in enumerate(sorted(model_files, key=os.path.getmtime, reverse=True)[:5]):
+                        model_name = os.path.basename(model_file)
+                        mod_time = datetime.fromtimestamp(os.path.getmtime(model_file))
+                        print(f"  {i+1}. {model_name} ({mod_time.strftime('%Y-%m-%d %H:%M')})")
+                    
+                    print(f"  0. Usa ultimo modello (raccomandato)")
+                    
+                    model_choice = input("\nSeleziona modello (0 per ultimo): ").strip()
+                    
+                    if model_choice == "0" or model_choice == "":
+                        # Usa l'ultimo modello
+                        model_files.sort(key=os.path.getmtime, reverse=True)
+                        selected_model = model_files[0]
+                    else:
+                        try:
+                            idx = int(model_choice) - 1
+                            if 0 <= idx < len(model_files):
+                                selected_model = model_files[idx]
+                            else:
+                                print("❌ Selezione non valida")
+                                continue
+                        except:
+                            print("❌ Input non valido")
+                            continue
+                    
+                    print(f"\n🔍 Analisi di: {os.path.basename(selected_model)}")
+                    
+                    # Esegui analisi sul modello selezionato
+                    result = orchestrator.analyze_model(model_path=selected_model)
                     
                     if result["success"]:
                         print(f"\n✅ ANALISI COMPLETATA")
+                        print(f"   Tipo modello: {result.get('model_type', 'N/A')}")
                         if result.get("report_path"):
                             print(f"   Report: {result['report_path']}")
-                    else:
-                        print(f"❌ Errore: {result.get('error')}")
+                        
+                        # Mostra sommario
+                        try:
+                            import json
+                            with open(result['report_path'], 'r') as f:
+                                report = json.load(f)
+                            
+                            print(f"\n📊 SOMMARIO PERFORMANCE:")
+                            perf = report.get('performance', {})
+                            if 'test_accuracy' in perf:
+                                print(f"   Accuracy test: {perf['test_accuracy']:.2%}")
+                            if 'test_r2' in perf:
+                                print(f"   R² test: {perf['test_r2']:.3f}")
+                            
+                            insights = report.get('insights', [])
+                            if insights:
+                                print(f"\n💡 INSIGHTS:")
+                                for insight in insights[:3]:  # Mostra primi 3
+                                    print(f"   • {insight}")
+                                    
+                        except:
+                            pass
                 
                 elif choice == "4":
                     # CHAT INTERATTIVA
@@ -262,6 +380,19 @@ def main():
                             print(f"   Pattern errori trovati: {result.get('error_patterns_found', 0)}")
                         
                         print(f"   Modello: {result.get('model_name', 'N/A')}")
+                    else:
+                        print(f"❌ Errore: {result.get('error')}")
+                elif choice == "8":
+                    print("\n" + "=" * 60)
+                    print("🚀 PIPELINE UNIFICATA - SINGOLO MODELLO")
+                    print("=" * 60)
+                    
+                    result = orchestrator.run_unified_training_pipeline()
+                    
+                    if result["success"]:
+                        print(f"\n✅ MODELLO UNICO ADDESTRATO!")
+                        print(f"   Accuracy TP/SL: {result.get('accuracy', 0):.2%}")
+                        print(f"   Modello: {os.path.basename(result.get('model_path', ''))}")
                     else:
                         print(f"❌ Errore: {result.get('error')}")
                 else:

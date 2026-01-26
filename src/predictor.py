@@ -6,7 +6,7 @@ Predizione con TP/SL - Versione semplificata ma completa
 import os
 import numpy as np
 import pandas as pd
-import tensorflow as tf
+import tensorflow as tf  # 🔥 USA tensorflow.keras
 from typing import Dict, List, Any, Union
 import joblib
 import logging
@@ -14,6 +14,12 @@ from datetime import datetime
 import warnings
 from timestamp_features import TimestampFeatureExtractor
 warnings.filterwarnings('ignore')
+from typing import Dict, List, Any, Union, Optional
+
+# 🔥 AGGIUNGI QUESTI IMPORT PER load_model
+import json
+import glob
+import h5py
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,57 +46,384 @@ class TradingPredictor:
         logger.info(f"TradingPredictor inizializzato")
     
     def load_model(self, model_path: str, scaler_path: str = None):
-        """Carica modello e scaler."""
+        """Carica modello e scaler con gestione COMPLETA compatibilità Keras."""
         try:
-            logger.info(f"Caricamento modello: {model_path}")
-            self.model = tf.keras.models.load_model(model_path)
+            logger.info(f"🔄 Caricamento modello: {os.path.basename(model_path)}")
             
-            # CRITICO: Carica SEMPRE lo scaler
-            if scaler_path and os.path.exists(scaler_path):
-                self.scaler = joblib.load(scaler_path)
-                logger.info(f"✅ Scaler caricato: {scaler_path}")
+            import h5py
+            import json
+            
+            # 🔥 PASSO 1: VERIFICA FORMATO E STRATEGIA DI CARICAMENTO
+            file_ext = os.path.splitext(model_path)[1].lower()
+            
+            # Strategie di caricamento in base al formato
+            if file_ext == '.keras':
+                # FORMATO MODERNO KERAS - carica normalmente
+                logger.info("📦 Formato .keras rilevato (moderno)")
+                self.model = tf.keras.models.load_model(model_path)
+                logger.info("✅ Modello .keras caricato normalmente")
+                
+            elif file_ext == '.h5':
+                # FORMATO .h5 - gestione avanzata
+                logger.info("📦 Formato .h5 rilevato (legacy)")
+                self.model = self._load_h5_model_with_compatibility(model_path)
+                
             else:
-                logger.warning("⚠️  Scaler non trovato, cerco alternativa...")
+                raise ValueError(f"Formato file non supportato: {file_ext}")
+            
+            # 🔥 PASSO 2: VERIFICA E RICOMPILAZIONE SE NECESSARIA
+            self._ensure_model_is_compiled(model_path)
+            
+            # 🔥 PASSO 3: CARICA SCALER CON RICERCA INTELLIGENTE
+            self._load_scaler_with_intelligence(model_path, scaler_path)
+            
+            # 🔥 PASSO 4: ESTRAI INFO DIMENSIONALI
+            self._extract_model_dimensions()
+            
+            # 🔥 PASSO 5: CARICA METADATA
+            self._load_model_metadata(model_path)
+            
+            logger.info("✅ Modello e scaler caricati con successo!")
+            
+        except Exception as e:
+            logger.error(f"❌ Errore critico nel caricamento: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def _load_h5_model_with_compatibility(self, model_path: str) -> tf.keras.Model:
+        """Carica modello .h5 con gestione avanzata compatibilità."""
+        import h5py
+        
+        # PRIMA: Verifica se è un modello salvato in formato separato
+        try:
+            with h5py.File(model_path, 'r') as f:
+                if 'saved_format' in f.attrs and f.attrs['saved_format'] == 'separated_components':
+                    logger.info("📦 Modello in formato separato rilevato")
+                    return self._load_separated_model(model_path, f)
+        except:
+            pass  # Non è formato separato, procedi normalmente
+        
+        # SECONDA: Prova a caricare con diverse strategie
+        load_strategies = [
+            self._try_load_h5_normal,
+            self._try_load_h5_with_custom_objects,
+            self._try_load_h5_compile_false
+        ]
+        
+        last_error = None
+        for strategy in load_strategies:
+            try:
+                model = strategy(model_path)
+                if model:
+                    return model
+            except Exception as e:
+                last_error = e
+                continue
+        
+        # Se tutte le strategie falliscono
+        raise RuntimeError(f"Tutte le strategie di caricamento .h5 fallite. Ultimo errore: {last_error}")
+
+    def _load_separated_model(self, model_path: str, h5_file) -> tf.keras.Model:
+        """Carica modello in formato separato (pesi + architettura)."""
+        import json
+        
+        model_dir = os.path.dirname(model_path)
+        
+        # Carica architettura
+        arch_file = h5_file.attrs['architecture_file']
+        arch_path = os.path.join(model_dir, arch_file)
+        
+        with open(arch_path, 'r') as f:
+            model_json = f.read()
+        
+        # Crea modello dall'architettura
+        model = tf.keras.models.model_from_json(model_json)
+        
+        # Carica pesi
+        weights_file = h5_file.attrs['weights_file']
+        weights_path = os.path.join(model_dir, weights_file)
+        model.load_weights(weights_path)
+        
+        logger.info(f"✅ Modello caricato da formato separato")
+        logger.info(f"   Architettura: {arch_file}")
+        logger.info(f"   Pesi: {weights_file}")
+        
+        return model
+
+    def _try_load_h5_normal(self, model_path: str) -> tf.keras.Model:
+        """Prima strategia: carica normalmente."""
+        return tf.keras.models.load_model(model_path)
+
+    def _try_load_h5_with_custom_objects(self, model_path: str) -> tf.keras.Model:
+        """Seconda strategia: carica con custom_objects."""
+        custom_objects = {
+            # Metriche come stringhe
+            'mse': 'mse',
+            'mae': 'mae',
+            'accuracy': 'accuracy',
+            'binary_accuracy': 'binary_accuracy',
+            'auc': 'auc',
+            'categorical_accuracy': 'categorical_accuracy',
+            
+            # Layer
+            'BatchNormalization': tf.keras.layers.BatchNormalization,
+            'Dropout': tf.keras.layers.Dropout,
+            'Bidirectional': tf.keras.layers.Bidirectional,
+            'LSTM': tf.keras.layers.LSTM,
+            'Dense': tf.keras.layers.Dense,
+            'Input': tf.keras.layers.Input,
+        }
+        
+        return tf.keras.models.load_model(
+            model_path, 
+            custom_objects=custom_objects
+        )
+
+    def _try_load_h5_compile_false(self, model_path: str) -> tf.keras.Model:
+        """Terza strategia: carica senza compilare."""
+        return tf.keras.models.load_model(
+            model_path, 
+            compile=False
+        )
+
+    def _ensure_model_is_compiled(self, model_path: str):
+        """Garantisce che il modello sia compilato."""
+        if self.model.compiled_loss is None:
+            logger.info("🔧 Modello non compilato, ricompilo...")
+            
+            # Determina tipo di problema
+            problem_type = self._detect_problem_type(model_path)
+            
+            # Configura in base al tipo
+            if problem_type == 'binary_classification':
+                self.model.compile(
+                    optimizer='adam',
+                    loss='binary_crossentropy',
+                    metrics=['accuracy']
+                )
+                logger.info("✅ Ricompilato per classificazione binaria")
                 
-                # Cerca scaler con stesso nome del modello
-                import glob
-                model_dir = os.path.dirname(model_path)
-                model_base = os.path.basename(model_path).replace('.h5', '')
+            elif problem_type == 'multi_classification':
+                self.model.compile(
+                    optimizer='adam',
+                    loss='categorical_crossentropy',
+                    metrics=['accuracy']
+                )
+                logger.info("✅ Ricompilato per classificazione multi-classe")
                 
-                # Cerca scaler con pattern simile
-                scaler_pattern = os.path.join(model_dir, f"{model_base}*scaler*.pkl")
-                scaler_files = glob.glob(scaler_pattern)
+            else:  # regressione di default
+                self.model.compile(
+                    optimizer='adam',
+                    loss='mse',
+                    metrics=['mae']
+                )
+                logger.info("✅ Ricompilato per regressione")
+
+    def _get_current_price_from_data(self, data: Union[pd.DataFrame, np.ndarray] = None) -> Optional[float]:
+        """
+        Estrae il prezzo corrente dai dati se disponibili.
+        
+        Returns:
+            float: Prezzo corrente, o None se non disponibile
+        """
+        # Se abbiamo dati recenti nel predictor
+        if hasattr(self, 'last_data') and self.last_data is not None:
+            try:
+                if isinstance(self.last_data, pd.DataFrame):
+                    # Cerca colonna 'price' o 'close' o la prima colonna numerica
+                    for col in ['price', 'close', 'Price', 'Close']:
+                        if col in self.last_data.columns:
+                            return float(self.last_data[col].iloc[-1])
+                    
+                    # Se non trova, cerca la prima colonna numerica
+                    numeric_cols = self.last_data.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        return float(self.last_data[numeric_cols[0]].iloc[-1])
                 
-                if scaler_files:
-                    scaler_path = scaler_files[0]
-                    self.scaler = joblib.load(scaler_path)
-                    logger.info(f"✅ Scaler alternativo trovato: {scaler_path}")
+                elif isinstance(self.last_data, np.ndarray):
+                    # Assumi che il prezzo sia nella prima colonna
+                    if len(self.last_data.shape) > 1:
+                        return float(self.last_data[-1, 0])
+                    else:
+                        return float(self.last_data[-1])
+            except Exception as e:
+                logger.warning(f"Impossibile estrarre prezzo dai dati: {e}")
+        
+        return None
+
+    def _extract_current_price_from_data(self, data: Union[pd.DataFrame, np.ndarray]) -> float:
+        """
+        Estrae il prezzo corrente dai dati di input.
+        
+        Args:
+            data: Dati di input (DataFrame o array)
+        
+        Returns:
+            float: Prezzo corrente (default 1.10000 se non trovato)
+        """
+        try:
+            if isinstance(data, pd.DataFrame):
+                # Cerca colonne prezzo
+                price_columns = ['price', 'Price', 'PRICE', 'close', 'Close', 'CLOSE']
+                
+                for col in price_columns:
+                    if col in data.columns:
+                        price = data[col].iloc[-1]
+                        logger.info(f"📊 Prezzo corrente estratto da colonna '{col}': {price:.5f}")
+                        return float(price)
+                
+                # Se non trova, cerca la prima colonna numerica
+                numeric_cols = data.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) > 0:
+                    price = data[numeric_cols[0]].iloc[-1]
+                    logger.info(f"📊 Prezzo corrente dalla prima colonna numerica: {price:.5f}")
+                    return float(price)
+            
+            elif isinstance(data, np.ndarray):
+                # Array numpy - assumi che il prezzo sia il primo elemento
+                if len(data.shape) == 1:
+                    price = data[-1]
                 else:
-                    logger.error("❌ Nessuno scaler trovato!")
-                    logger.warning("Predizioni potrebbero essere inaccurate")
+                    price = data[-1, 0]
+                
+                logger.info(f"📊 Prezzo corrente da array numpy: {price:.5f}")
+                return float(price)
+        
+        except Exception as e:
+            logger.warning(f"⚠️  Impossibile estrarre prezzo corrente: {e}")
+        
+        # Fallback
+        logger.warning("⚠️  Prezzo corrente non trovato, uso default 1.10000")
+        return 1.10000
+
+    def _detect_problem_type(self, model_path: str) -> str:
+        """Rileva tipo di problema dal modello o metadata."""
+        
+        # 1. Prova dai metadata
+        metadata_path = model_path.replace('.h5', '_metadata.json').replace('.keras', '_metadata.json')
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                if 'problem_type' in metadata:
+                    return metadata['problem_type']
+            except:
+                pass
+        
+        # 2. Rileva dall'architettura del modello
+        try:
+            last_layer = self.model.layers[-1]
             
-            # Estrai metadati
-            if len(self.model.input_shape) == 3:
-                if self.sequence_length is None:
-                    self.sequence_length = self.model.input_shape[1]
-                self.n_features = self.model.input_shape[2]
+            if hasattr(last_layer, 'activation'):
+                activation = last_layer.activation
+                
+                # Ottieni nome attivazione
+                if hasattr(activation, '__name__'):
+                    act_name = activation.__name__
+                elif isinstance(activation, str):
+                    act_name = activation
+                else:
+                    act_name = str(activation)
+                
+                # Determina tipo
+                if 'sigmoid' in act_name.lower() and self.model.output_shape[-1] == 1:
+                    return 'binary_classification'
+                elif 'softmax' in act_name.lower():
+                    return 'multi_classification'
+        except:
+            pass
+        
+        # Default
+        return 'regression'
+
+    def _load_scaler_with_intelligence(self, model_path: str, scaler_path: str = None):
+        """Carica scaler con ricerca intelligente."""
+        import glob
+        
+        # Se scaler_path è fornito e esiste
+        if scaler_path and os.path.exists(scaler_path):
+            self.scaler = joblib.load(scaler_path)
+            logger.info(f"✅ Scaler caricato dal path fornito: {os.path.basename(scaler_path)}")
+            return
+        
+        # Ricerca intelligente
+        model_dir = os.path.dirname(model_path)
+        model_base = os.path.basename(model_path)
+        
+        # Rimuovi estensioni
+        model_base_no_ext = model_base.replace('.h5', '').replace('.keras', '')
+        
+        # Pattern di ricerca in ordine di priorità
+        search_patterns = [
+            # Pattern esatto
+            os.path.join(model_dir, f"{model_base_no_ext}_scaler.pkl"),
+            # Pattern con wildcard
+            os.path.join(model_dir, f"{model_base_no_ext}*scaler*.pkl"),
+            # Pattern più generico
+            os.path.join(model_dir, f"{model_base_no_ext.split('_classifier')[0]}*scaler*.pkl"),
+            # Tutti gli scaler
+            os.path.join(model_dir, "*scaler*.pkl")
+        ]
+        
+        for pattern in search_patterns:
+            scaler_files = glob.glob(pattern)
+            if scaler_files:
+                # Prendi il più recente
+                scaler_files.sort(key=os.path.getmtime, reverse=True)
+                selected_scaler = scaler_files[0]
+                
+                self.scaler = joblib.load(selected_scaler)
+                logger.info(f"✅ Scaler trovato automaticamente: {os.path.basename(selected_scaler)}")
+                return
+        
+        # Se non trovato
+        logger.error("❌ Nessuno scaler trovato!")
+        logger.error("   Pattern cercati:")
+        for pattern in search_patterns[:3]:
+            logger.error(f"   - {os.path.basename(pattern)}")
+        
+        raise FileNotFoundError(f"Nessuno scaler trovato per {model_base}")
+
+    def _extract_model_dimensions(self):
+        """Estrai sequence_length e n_features dal modello."""
+        if self.model is None:
+            return
+        
+        if len(self.model.input_shape) == 3:
+            if self.sequence_length is None:
+                self.sequence_length = int(self.model.input_shape[1])
             
-            # Carica metadata
-            metadata_path = model_path.replace('.h5', '_metadata.json')
-            if os.path.exists(metadata_path):
-                import json
+            self.n_features = int(self.model.input_shape[2])
+            
+            logger.info(f"📐 Dimensioni modello:")
+            logger.info(f"   Sequence length: {self.sequence_length}")
+            logger.info(f"   Numero features: {self.n_features}")
+
+    def _load_model_metadata(self, model_path: str):
+        """Carica metadata del modello."""
+        import json
+        
+        metadata_path = model_path.replace('.h5', '_metadata.json').replace('.keras', '_metadata.json')
+        
+        if os.path.exists(metadata_path):
+            try:
                 with open(metadata_path, 'r') as f:
                     self.model_metadata = json.load(f)
                 
-                # Estrai feature names se disponibili
+                logger.info(f"📄 Metadata caricati: {os.path.basename(metadata_path)}")
+                
+                # Estrai feature_names se disponibili
                 if not self.feature_names and 'feature_names' in self.model_metadata:
                     self.feature_names = self.model_metadata['feature_names']
-            
-            logger.info("✅ Modello caricato con successo")
-            
-        except Exception as e:
-            logger.error(f"❌ Errore caricamento modello: {e}")
-            raise
+                    logger.info(f"   Feature names: {len(self.feature_names)} features")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️  Impossibile caricare metadata: {e}")
+                self.model_metadata = {}
+        else:
+            logger.warning("⚠️  File metadata non trovato")
+            self.model_metadata = {}
     
     def prepare_input_data(self, data: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Prepara dati per predizione INCLUSO timestamp features."""
@@ -103,6 +436,10 @@ class TradingPredictor:
             df = pd.DataFrame(data)
         else:
             raise TypeError(f"Tipo dati non supportato: {type(data)}")
+        
+        # 🔥 PASSO 0: VALIDA COMPATIBILITÀ SCALER
+        if self.scaler is not None:
+            df = self.validate_scaler_compatibility(df)
         
         # Verifica lunghezza
         if len(df) < self.sequence_length:
@@ -182,9 +519,68 @@ class TradingPredictor:
         
         return input_array
     
+    def validate_scaler_compatibility(self, data_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Verifica e corregge la compatibilità tra dati e scaler.
+        Restituisce DataFrame compatibile.
+        """
+        if self.scaler is None:
+            logger.warning("⚠️  Nessuno scaler disponibile")
+            return data_df
+        
+        # 🔥 1. Verifica se lo scaler ha attributo n_features_in_
+        expected_features = getattr(self.scaler, 'n_features_in_', None)
+        if expected_features is None:
+            logger.warning("⚠️  Scaler senza n_features_in_, continuo senza validazione")
+            return data_df
+        
+        # 🔥 2. Conta features numeriche nei dati
+        numeric_columns = data_df.select_dtypes(include=[np.number]).columns
+        actual_features = len(numeric_columns)
+        
+        logger.info(f"🔍 Validazione scaler:")
+        logger.info(f"   Features dati: {actual_features}")
+        logger.info(f"   Features scaler: {expected_features}")
+        
+        # 🔥 3. Se match perfetto, tutto OK
+        if actual_features == expected_features:
+            logger.info("✅ Match perfetto features")
+            return data_df
+        
+        # 🔥 4. Se più features nei dati, riduci
+        if actual_features > expected_features:
+            logger.warning(f"⚠️  Troppe features: {actual_features} > {expected_features}")
+            logger.info(f"   Mantengo prime {expected_features} features")
+            
+            # Mantieni solo prime N colonne numeriche
+            selected_columns = list(numeric_columns[:expected_features])
+            
+            # Mantieni anche timestamp se presente
+            if 'timestamp' in data_df.columns:
+                selected_columns = ['timestamp'] + selected_columns
+            
+            return data_df[selected_columns]
+        
+        # 🔥 5. Se meno features nei dati, aggiungi dummy
+        if actual_features < expected_features:
+            logger.warning(f"⚠️  Poche features: {actual_features} < {expected_features}")
+            logger.info(f"   Aggiungo {expected_features - actual_features} colonne dummy")
+            
+            # Crea DataFrame di zeri per le features mancanti
+            for i in range(actual_features, expected_features):
+                col_name = f"dummy_feature_{i}"
+                data_df[col_name] = 0.0
+            
+            logger.info(f"   Dati ora hanno {expected_features} features")
+        
+        return data_df
+
     def predict_single(self, data: Union[pd.DataFrame, np.ndarray],
-                      return_confidence: bool = False) -> Dict[str, Any]:
+                  return_confidence: bool = False) -> Dict[str, Any]:
         """Effettua singola predizione."""
+        # 🔥 SALVA I DATI PER USO SUCCESSIVO
+        self.last_data = data.copy() if isinstance(data, pd.DataFrame) else data
+        
         # Prepara dati
         input_data = self.prepare_input_data(data)
         
@@ -204,10 +600,14 @@ class TradingPredictor:
         else:
             prediction_denorm = prediction_value
         
+        # 🔥 OTTIENI PREZZO CORRENTE DAI DATI
+        current_price = self._extract_current_price_from_data(data)
+        
         # Risultato base
         result = {
             'prediction': prediction_denorm,
             'prediction_raw': prediction_value,
+            'current_price': current_price,  # 🔥 AGGIUNTO
             'timestamp': datetime.now().isoformat(),
             'sequence_length_used': self.sequence_length
         }
@@ -217,11 +617,12 @@ class TradingPredictor:
             ci_result = self.calculate_confidence_interval(input_data)
             result.update(ci_result)
         
-        # Segnale di trading
-        signal_result = self.generate_trading_signal(prediction_denorm)
+        # 🔥 PASSA IL PREZZO CORRENTE A calculate_tp_sl
+        signal_result = self.generate_trading_signal(prediction_denorm, current_price)
         result.update(signal_result)
         
         logger.info(f"✅ Predizione: {prediction_denorm:.6f}")
+        logger.info(f"   Prezzo corrente: {current_price:.5f}")
         
         return result
     
@@ -278,11 +679,16 @@ class TradingPredictor:
             }
     
     def generate_trading_signal(self, prediction: float, 
-                               timestamp: pd.Series = None) -> Dict[str, Any]:
+                           current_price: float = None,
+                           timestamp: pd.Series = None) -> Dict[str, Any]:
         """Genera segnale con adattamento temporale."""
         
-        # Calcola TP/SL base
-        tp_sl_result = self.calculate_tp_sl(prediction)
+        # 🔥 CALCOLA TP/SL CON PREZZO CORRENTE
+        if current_price is None:
+            current_price = 1.10000
+            logger.warning("⚠️  Nessun prezzo fornito, uso default 1.10000")
+        
+        tp_sl_result = self.calculate_tp_sl(prediction, current_price)
         
         # 🔥 ADATTA in base all'ora se timestamp disponibile
         if timestamp is not None and len(timestamp) > 0:
@@ -299,7 +705,7 @@ class TradingPredictor:
             tp_sl_result['tp_pips'] = int(tp_sl_result['tp_pips'] * volatility_factor)
             tp_sl_result['sl_pips'] = int(tp_sl_result['sl_pips'] * volatility_factor)
             
-            # Aggiorna prezzi
+            # 🔥 RICALCOLA PREZZI CON NUOVI PIPS
             current_price = tp_sl_result['entry_price']
             pip_value = 0.0001
             
@@ -339,8 +745,21 @@ class TradingPredictor:
             'recommendations': recommendations
         }
     
-    def calculate_tp_sl(self, prediction: float) -> Dict[str, Any]:
-        """Calcola Take Profit e Stop Loss con R/R = 4:1."""
+    def calculate_tp_sl(self, prediction: float, current_price: float = None) -> Dict[str, Any]:
+        """
+        Calcola Take Profit e Stop Loss con R/R = 4:1.
+        
+        Args:
+            prediction: Valore predetto dal modello
+            current_price: Prezzo corrente REALE (se None, usa 1.10000 come fallback)
+        """
+        # Se non viene fornito un prezzo corrente, prova a calcolarlo dai dati
+        if current_price is None:
+            current_price = self._get_current_price_from_data()
+            if current_price is None:
+                logger.warning("⚠️  Prezzo corrente non disponibile, uso default 1.10000")
+                current_price = 1.10000
+        
         # Per forex, assumiamo che prediction sia in pips
         predicted_pips = prediction * 50  # Scala
         
@@ -359,10 +778,7 @@ class TradingPredictor:
             sl_pips = 20    # 1R = 20 pips  
             risk_reward = 4.0
         
-        # Prezzo corrente di esempio (dovrebbe essere estratto dai dati)
-        current_price = 1.10000
-        
-        # Calcola prezzi
+        # 🔥 CALCOLA PREZZI REALI
         pip_value = 0.0001
         
         if operation == "BUY":
@@ -372,7 +788,7 @@ class TradingPredictor:
             tp_price = current_price - (tp_pips * pip_value)
             sl_price = current_price + (sl_pips * pip_value)
         
-        # Round per forex
+        # Round per forex (5 decimali per EUR/USD)
         decimals = 5
         tp_price = round(tp_price, decimals)
         sl_price = round(sl_price, decimals)
@@ -394,13 +810,12 @@ class TradingPredictor:
             'confidence': min(0.95, 0.5 + abs(prediction) / 2)
         }
     
-    def _calculate_position_size(self, entry_price: float, sl_pips: int) -> Dict[str, Any]:
-        """Calcola dimensionamento posizione."""
-        RISK_PER_TRADE = 0.02  # 2%
+    def _calculate_position_size(self, entry_price: float, sl_pips: int, risk_percent: float = 4.0) -> Dict[str, Any]:
+        """Calcola dimensionamento posizione con rischio personalizzabile."""
         ACCOUNT_BALANCE = 10000.0
         LOT_SIZE = 100000
         
-        risk_amount = ACCOUNT_BALANCE * RISK_PER_TRADE
+        risk_amount = ACCOUNT_BALANCE * (risk_percent / 100.0)
         
         if sl_pips > 0:
             risk_per_pip = risk_amount / sl_pips
@@ -418,7 +833,7 @@ class TradingPredictor:
             'lots': round(lots, 2),
             'position_value_usd': round(position_value, 2),
             'risk_amount_usd': round(risk_amount, 2),
-            'risk_percent': RISK_PER_TRADE * 100
+            'risk_percent': risk_percent
         }
     
     def _generate_recommendations(self, signal: str, strength: float, 
@@ -468,6 +883,19 @@ class TradingPredictor:
         info.update(self.model_metadata)
         return info
 
+    # In predictor.py, aggiungi questa funzione:
+    def ensure_scaler_compatibility(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Garantisce che i dati abbiano stesso numero di features dello scaler."""
+        if self.scaler is None:
+            return data
+        
+        expected_features = getattr(self.scaler, 'n_features_in_', None)
+        if expected_features and len(data.columns) != expected_features:
+            logger.warning(f"Mismatch features: dati={len(data.columns)}, scaler={expected_features}")
+            # Mantieni solo le prime N features
+            return data.iloc[:, :expected_features]
+        return data
+    
 def create_predictor_from_training(model_dir: str = 'models') -> TradingPredictor:
     """
     Crea predictor dall'ultimo modello addestrato.
@@ -505,6 +933,8 @@ def create_predictor_from_training(model_dir: str = 'models') -> TradingPredicto
     
     return predictor
 
+    
+    
 if __name__ == "__main__":
     # Test
     print("Test predictor.py")
@@ -532,3 +962,4 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"❌ Errore: {e}")
+

@@ -1,0 +1,8 @@
+{
+  "paths": {
+    "data_dir": "C:\\Users\\Giovanni\\Documents\\Python\\forex_ai_deepseek_agent\\data",
+    "models_dir": "C:\\Users\\Giovanni\\Documents\\Python\\forex_ai_deepseek_agent\\models",
+    "analysis_dir": "C:\\Users\\Giovanni\\Documents\\Python\\forex_ai_deepseek_agent\\analysis",
+    "logs_dir": "C:\\Users\\Giovanni\\Documents\\Python\\forex_ai_deepseek_agent\\logs"
+  }
+}

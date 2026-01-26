@@ -255,11 +255,11 @@ def analyze_trading_model(model_path: str,
     import os
     os.makedirs(output_dir, exist_ok=True)
     
-    logger.info("Analisi modello...")
+    logger.info("Analisi modello con compatibilità garantita...")
     
-    # Carica modello
-    from tensorflow.keras.models import load_model
-    model = load_model(model_path)
+    # Carica modello con sistema garantito
+    from model_compatibility import load_model_guaranteed
+    model = load_model_guaranteed(model_path)
     scaler = joblib.load(scaler_path) if scaler_path and os.path.exists(scaler_path) else None
     
     # Inizializza analyzer
