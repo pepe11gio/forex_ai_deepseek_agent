@@ -1,0 +1,4 @@
+
+1) server per metatrader
+2) funzioni per restituire a script mql BUY/SELL - TP e SL
+3) script mql5 di backtesting

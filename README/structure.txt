@@ -1,0 +1,38 @@
+FOREX_AI_TF_TPSL/
+├─ data/
+│  ├─ raw/                       # CSV originali (EURUSD H1)
+│  ├─ processed/                 # dataset pronto (numpy/parquet)
+│  └─ splits/                    # indici walk-forward
+├─ models/
+│  ├─ checkpoints/
+│  └─ exports/                   # SavedModel + scaler
+├─ reports/
+│  ├─ backtests/
+│  └─ metrics/
+├─ src/
+│  ├─ config.py
+│  ├─ io/
+│  │  ├─ data_loader.py          # carica e pulisce OHLCV
+│  │  └─ dataset_writer.py       # salva processed
+│  ├─ features/
+│  │  ├─ breakout_features.py   
+│  │  ├─ derived_features.py        
+│  │  ├─ support_resistance.py  
+│  │  ├─ support_resistance_fast.py  
+│  │  ├─ support_resistance_slow.py  
+│  │  ├─ normalizer.py           # fit su train, apply su val/test
+│  │  └─ windowing.py            # finestre multi-scala 48/128/256
+│  ├─ labeling/
+│  │  └─ tp_sl_labeler.py        # label LONG/SHORT con spread e H=48
+│  ├─ modeling/
+│  │  ├─ tf_model.py             # architettura multi-branch
+│  │  ├─ losses.py               # BCE / focal (opzionale)
+│  │  └─ trainer.py              # fit + early stopping + export
+│  ├─ evaluation/
+│  │  ├─ walk_forward.py         # generator split temporali
+│  │  ├─ backtester.py           # logica trade + metriche
+│  │  └─ threshold_search.py     # ricerca soglie su val (expectancy)
+│  ├─ analysis/
+│  │  └─ signal_generator.py     # segnali + TP/SL per “oggi”
+│  └─ main.py                    # entrypoint: train / backtest / signal
+└─ README.md
