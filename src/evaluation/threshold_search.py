@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.config import ProjectConfig
 from src.labeling.tp_sl_labeler import min_sl_net_filter_mask
+from src.evaluation.regime_filter import compute_trade_allowed_mask
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,13 @@ def decide_actions(
     valid = df["valid_label"].astype(bool).to_numpy() if "valid_label" in df.columns else np.ones(len(df), dtype=bool)
     sl_mask = min_sl_net_filter_mask(df, cfg).to_numpy(dtype=bool)
 
+    # regime filter
+    if getattr(cfg, "regime", None) is not None and cfg.regime.enabled:
+        reg = compute_trade_allowed_mask(df, cfg)
+        regime_mask = reg.allowed_mask
+    else:
+        regime_mask = np.ones(len(df), dtype=bool)
+
     sl = _safe_col(df, "sl_net_pips", default=np.nan)
     tp = _safe_col(df, "tp_net_pips", default=np.nan)
     cost = _safe_col(df, "cost_pips", default=float(cfg.market.spread_pips))
@@ -73,6 +81,8 @@ def decide_actions(
 
     for i in range(len(df)):
         if not valid[i]:
+            continue
+        if not regime_mask[i]:
             continue
         if not sl_mask[i]:
             continue

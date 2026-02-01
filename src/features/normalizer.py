@@ -116,6 +116,23 @@ class FeatureScaler:
             params={k: dict(v) for k, v in payload["params"].items()},
         )
         return FeatureScaler.from_state(state)
+    
+    def load_into_self(self, path: str) -> "FeatureScaler":
+        """
+        Carica da file dentro l'istanza corrente.
+        Mantiene compatibilità con la factory FeatureScaler.load(path)
+        che ritorna un nuovo oggetto.
+
+        Uso:
+            sc = FeatureScaler("zscore").load_into_self(".../feature_scaler.json")
+        """
+        sc = FeatureScaler.load(path)  # <-- factory esistente
+        # Copia tutto nello stato dell'istanza corrente
+        self.scaler_type = sc.scaler_type
+        self.columns = sc.columns
+        self.params = sc.params
+        return self
+
 
 
 def scaler_default_path(cfg: ProjectConfig, run_name: str = "default") -> str:

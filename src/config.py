@@ -2,8 +2,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Tuple, Optional, Literal
 
+# =========================
+# REGIME
+# =========================
+@dataclass(frozen=True)
+class RegimeConfig:
+    enabled: bool = True
+
+    # modalità filtro
+    # - trend_only: tradare solo in trend “pulito”
+    # - trend_or_range: trend + range “stabile”
+    # - no_chaos: escludi solo chaos
+    mode: Literal["trend_only", "trend_or_range", "no_chaos"] = "trend_only"
+
+    # soglie
+    trend_thr: float = 0.35      # trend_strength >= 0.35 (~ADX>=27)
+    atr_thr: float = 0.40        # atr_percentile >= 0.40
+
+    # range ok
+    atr_low: float = 0.25
+    atr_high: float = 0.65
+
+    # chaos exclude
+    chaos_atr_thr: float = 0.80
+
+    # warmup
+    warmup_bars: int = 250
 
 # =========================
 # CSV COLUMN MAPPING
@@ -208,6 +234,39 @@ class WalkForwardConfig:
     step_bars: int = 3500
     min_folds: int = 2
 
+# =========================
+# ENSEMBLE FOLD
+# =========================
+@dataclass(frozen=True)
+class EnsembleConfig:
+    enabled: bool = True
+
+    # come combinare le probabilità
+    method: Literal["mean", "median", "trimmed_mean"] = "mean"
+
+    # se vuoi specificare esplicitamente quali run usare (es: ("wf_fold_1","wf_fold_3"))
+    run_names: Tuple[str, ...] = ()
+
+    # se run_names è vuoto, scegli top_k dal summary
+    use_summary_auto_select: bool = True
+    summary_path: str = "reports/walk_forward_summary.json"
+    top_k: int = 3
+
+    # pesi (opzionale)
+    weight_mode: Literal["equal", "val_expectancy", "val_profit_factor"] = "val_expectancy"
+    weight_power: float = 1.0  # amplifica differenze (1.0 = lineare)
+
+    # robustezza: scarta fold con pochi trades in validation
+    min_val_trades: int = 30
+
+    # trimmed mean: scarta estremi per robustezza
+    trimmed_frac: float = 0.15  # 0.15 => taglia 15% low e 15% high
+
+    # Backtest ensemble durante train_wf
+    backtest_enabled: bool = False
+
+    # durante walk-forward: usa solo modelli disponibili fino a quel fold (no future leakage)
+    backtest_past_only: bool = True
 
 # =========================
 # PROJECT CONFIG
@@ -234,6 +293,10 @@ class ProjectConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     walk_forward: WalkForwardConfig = field(default_factory=WalkForwardConfig)
+
+    ensemble: EnsembleConfig = field(default_factory=EnsembleConfig)
+
+    regime: RegimeConfig = field(default_factory=RegimeConfig)
 
     verbose: bool = True
 
